@@ -1,228 +1,451 @@
 import flet as ft
-import flet_charts as fch
 
-from datetime import datetime
-import json
-import os
+from fund import Fund
+from data import load_funds_from_json
 
-FILENAME = "funds.json"
+FUNDS_FILE = 'funds.json'
+ACCOUNT_BALANCE = 25000
+
+
+# Dark theme colors
+BACKGROUND = '#121212'
+SURFACE = '#1E1E1E'
+SURFACE_HOVER = '#292929'
+BORDER = '#333333'
+
+TEXT_PRIMARY = '#F5F5F5'
+TEXT_SECONDARY = '#A3A3A3'
+
+GREEN = '#4ADE80'
+BLUE = '#60A5FA'
+ORANGE = '#FB923C'
+RED = '#F87171'
+
 
 def main(page: ft.Page):
-    page.title = "Sinking Funds Dashboard"
-    page.scroll = "auto"
 
-    # --- Load funds ---
-    if os.path.exists(FILENAME):
-        with open(FILENAME, "r") as f:
-            raw_funds = json.load(f)
-            funds = [
-                {
-                    "name": x["name"],
-                    "target": x["target"],
-                    "frequency": x["frequency"],
-                    "monthly": x["monthly"],
-                    "balance": x["balance"],
-                    "due_date": datetime.fromisoformat(x["due_date"]).date()
-                } for x in raw_funds
-            ]
-    else:
-        funds = []
+    funds = load_funds_from_json(FUNDS_FILE)
 
-    # --- UI controls ---
-    funds_column = ft.Column()
-    total_text = ft.Text(value="Total Monthly: $0.00", size=16, weight="bold")
-    current_edit_fund = {"fund": None}
+    page.title = 'Savings Funds'
+    page.theme_mode = ft.ThemeMode.DARK
+    page.bgcolor = BACKGROUND
+    page.theme = ft.Theme(color_scheme=ft.ColorScheme(primary=BLUE, surface=SURFACE))
+    page.scroll = ft.ScrollMode.AUTO
 
-    # Pie chart
-    funds_chart = fch.PieChart(
-        expand=True,
-        sections_space=0,
-        center_space_radius=40,
-        #width=400,
-        #height=300,
-        sections=[]
+    def money(value):
+        return f'${value:,.2f}'
+
+    def allocated():
+        return sum(b.balance for b in funds)
+
+    # ---------- Dashboard components ----------
+
+    total_text = ft.Text(
+        size=32,
+        weight=ft.FontWeight.BOLD,
+    )
+    allocation_text = ft.Text(size=13, color='#64748B')
+    unallocated_text = ft.Text(size=12, color='#64748B')
+
+    allocation_progress = ft.ProgressBar(
+        value=0,
+        color=BLUE,
+        bgcolor=BORDER,
+        height=8,
+        border_radius=10,
     )
 
-    # Modal fields
-    modal_name = ft.TextField(label="Name")
-    modal_target = ft.TextField(label="Target", keyboard_type=ft.KeyboardType.NUMBER)
-    modal_frequency = ft.TextField(label="Frequency", keyboard_type=ft.KeyboardType.NUMBER)
-    modal_balance = ft.TextField(label="Balance", keyboard_type=ft.KeyboardType.NUMBER)
-    modal_due_date = ft.DatePicker(value=datetime.now().date())
+    fund_list = ft.Column(spacing=12)
 
-    # Modal dialog
-    edit_dialog = ft.AlertDialog(
-        modal=True,
-        title=ft.Text("Edit Fund"),
-        content=ft.Column([modal_name, modal_target, modal_frequency, modal_balance, modal_due_date], spacing=10),
-        actions=[],
-        actions_alignment=ft.MainAxisAlignment.END
-    )
+    def fund_card(fund):
+        icon_box = ft.Container(
+            content=ft.Icon(
+                ft.Icons.SHIELD,
+                size=24,
+            ),
+            bgcolor=SURFACE,
+            border_radius=12,
+            padding=11,
+        )
 
-    # Save and Cancel actions
-    def save_modal(e):
-        fund = current_edit_fund["fund"]
-        fund["name"] = modal_name.value
-        fund["target"] = float(modal_target.value)
-        fund["frequency"] = float(modal_frequency.value)
-        fund["monthly"] = fund["target"] / fund["frequency"] if fund["frequency"] > 0 else 0
-        fund["balance"] = float(modal_balance.value)
-        fund["due_date"] = modal_due_date.value
-        page.pop_dialog()
-        refresh_funds()
+        details = ft.Column(
+            [
+                ft.Text(
+                    fund.name,
+                    size=15,
+                    weight=ft.FontWeight.W_600,
+                ),
+                ft.Text(
+                    f'Target {money(fund.target)}'
+                    if fund.target > 0
+                    else 'No target set',
+                    size=12,
+                ),
+            ],
+            spacing=4,
+            expand=True,
+        )
 
-    def cancel_modal(e):
-        page.pop_dialog()
+        amounts = ft.Column(
+            [
+                ft.Text(
+                    money(fund.balance),
+                    size=16,
+                    weight=ft.FontWeight.BOLD,
+                ),
+                ft.Text(
+                    f'{fund.percent_funded:.1f}% funded' if fund.target > 0 else 'No target',
+                    size=12,
+                ),
+            ],
+            spacing=4,
+            horizontal_alignment=ft.CrossAxisAlignment.END,
+        )
 
-    edit_dialog.actions = [
-        ft.ElevatedButton("Save", on_click=save_modal),
-        ft.ElevatedButton("Cancel", on_click=cancel_modal)
-    ]
+        return ft.Container(
+            content=ft.Column(
+                [
+                    ft.Row(
+                        [icon_box, details, amounts],
+                        spacing=12,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    ft.ProgressBar(
+                        value=min(max(fund.percent_funded / 100, 0), 1),
+                        height=6,
+                        border_radius=10,
+                        color=BLUE,
+                        bgcolor=BORDER,
+                    ),
+                ],
+                spacing=14,
+            ),
+            border=ft.Border.all(1, '#E9EDF2'),
+            border_radius=16,
+            padding=16,
+        )
 
-    def open_edit_dialog(fund):
-        current_edit_fund["fund"] = fund
-        modal_name.value = fund["name"]
-        modal_target.value = str(fund["target"])
-        modal_frequency.value = str(fund["frequency"])
-        modal_balance.value = str(fund["balance"])
-        modal_due_date.value = fund["due_date"]
-        page.show_dialog(edit_dialog)
+    def refresh():
+        total_text.value = money(ACCOUNT_BALANCE)
+        allocation_text.value = (
+            f'{money(allocated())} allocated of '
+            f'{money(ACCOUNT_BALANCE)}'
+        )
+        unallocated_text.value = (
+            f'{money(ACCOUNT_BALANCE - allocated())} unallocated'
+        )
 
-    # Save funds to disk
-    def save_funds():
-        with open(FILENAME, "w") as f:
-            json.dump([
-                {
-                    "name": x["name"],
-                    "target": x["target"],
-                    "frequency": x["frequency"],
-                    "monthly": x["monthly"],
-                    "balance": x["balance"],
-                    "due_date": x["due_date"].isoformat()
-                } for x in funds
-            ], f, indent=2)
+        allocation_progress.value = (
+            min(allocated() / ACCOUNT_BALANCE, 1)
+            if ACCOUNT_BALANCE > 0
+            else 0
+        )
 
-    # --- Refresh UI ---
-    def refresh_funds():
-        # 3 columns
-        col1 = ft.Column(spacing=10)
-        col2 = ft.Column(spacing=10)
-        col3 = ft.Column(spacing=10)
-        all_columns = [col1, col2, col3]
-        funds_column.controls.clear()
-
-        for i, fund in enumerate(funds):
-            progress = min(fund["balance"] / fund["target"], 1.0) if fund["target"] > 0 else 0
-            custom_input = ft.TextField(hint_text="Enter amount", width=100, keyboard_type=ft.KeyboardType.NUMBER)
-
-            def add_amount(e, fund=fund, inp=custom_input):
-                try:
-                    val = float(inp.value)
-                    fund["balance"] += val
-                    inp.value = ""
-                    refresh_funds()
-                except:
-                    pass
-
-            def remove_amount(e, fund=fund, inp=custom_input):
-                try:
-                    val = float(inp.value)
-                    fund["balance"] = max(0, fund["balance"] - val)
-                    inp.value = ""
-                    refresh_funds()
-                except:
-                    pass
-
-            def delete_fund(e, fund=fund):
-                funds.remove(fund)
-                refresh_funds()
-
-            card = ft.Card(
-                content=ft.Column([
-                    ft.Text(fund["name"], weight="bold", size=16),
-                    ft.Text(f"Target: ${fund['target']:.2f}"),
-                    ft.Text(f"Monthly: ${fund['monthly']:.2f}"),
-                    ft.Text(f"Saved: ${fund['balance']:.2f}"),
-                    ft.Text(f"Next Due: {fund['due_date'].strftime('%m/%d/%Y')}"),
-                    ft.ProgressBar(value=progress, width=200, color="#4CAF50"),
-                    ft.Row([
-                        custom_input,
-                        ft.ElevatedButton("Add", on_click=add_amount),
-                        ft.ElevatedButton("Remove", bgcolor="#F44336", on_click=remove_amount),
-                        ft.ElevatedButton("Edit", on_click=lambda e, f=fund: open_edit_dialog(f)),
-                        ft.ElevatedButton("Delete", bgcolor="#F44336", on_click=delete_fund)
-                    ], spacing=5)
-                ], spacing=5),
-                elevation=2,
-                margin=5
-            )
-
-            # distribute cards to columns
-            all_columns[i % 3].controls.append(card)
-
-        funds_row = ft.Row([col1, col2, col3], spacing=20, alignment=ft.MainAxisAlignment.START)
-        funds_column.controls.append(funds_row)
-
-        # Update pie chart
-        chart_data = [fch.PieChartSection(title=f["name"], value=f["target"]) for f in funds]
-        funds_chart.sections = chart_data
-
-        # Update total
-        total = sum(f["monthly"] for f in funds)
-        total_text.value = f"Total Monthly: ${total:.2f}"
-
+        fund_list.controls = [fund_card(b) for b in funds]
         page.update()
-        save_funds()
 
-    # --- Add new fund UI ---
-    name_input = ft.TextField(label="Fund Name")
-    amount_input = ft.TextField(label="Target Amount", keyboard_type=ft.KeyboardType.NUMBER)
-    frequency_input = ft.TextField(label="Frequency (months)", keyboard_type=ft.KeyboardType.NUMBER)
-    due_date_input = ft.DatePicker(value=datetime.now().date())
+    # ---------- Dialog helpers ----------
 
-    def add_fund(e):
-        try:
-            target = float(amount_input.value)
-            freq = float(frequency_input.value)
-            if freq <= 0:
-                raise ValueError()
-        except:
-            page.snack_bar = ft.SnackBar(ft.Text("Invalid amount or frequency"))
-            page.snack_bar.open = True
-            page.update()
+    def close_dialog(dialog):
+        page.pop_dialog()
+
+    def open_add_fund(e):
+        name_input = ft.TextField(label='Fund name')
+        target_input = ft.TextField(
+            label='Savings target ($)',
+            value='0',
+            keyboard_type=ft.KeyboardType.NUMBER,
+        )
+        error = ft.Text(color='#DC2626', size=12)
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text('Add a fund'),
+            content=ft.Column(
+                [name_input, target_input, error],
+                tight=True,
+                width=320,
+            ),
+        )
+
+        def save_fund(e):
+            name = (name_input.value or '').strip()
+
+            try:
+                target = float(target_input.value or '0')
+                if target < 0:
+                    raise ValueError
+            except ValueError:
+                error.value = 'Enter a valid target amount.'
+                page.update()
+                return
+
+            if not name:
+                error.value = 'Enter a fund name.'
+                page.update()
+                return
+
+            funds.append(Fund(name, target, 0.0))
+
+            close_dialog(dialog)
+            refresh()
+
+        dialog.actions = [
+            ft.TextButton(
+                'Cancel',
+                on_click=lambda e: close_dialog(dialog),
+            ),
+            ft.FilledButton(
+                'Add fund',
+                on_click=save_fund,
+            ),
+        ]
+
+        page.show_dialog(dialog)
+
+    def open_move_money(e):
+        if len(funds) < 2:
             return
 
-        monthly = target / freq
-        fund = {
-            "name": name_input.value,
-            "target": target,
-            "frequency": freq,
-            "monthly": monthly,
-            "balance": 0.0,
-            "due_date": due_date_input.value
-        }
-        funds.append(fund)
-        name_input.value = ""
-        amount_input.value = ""
-        frequency_input.value = ""
-        due_date_input.value = datetime.now().date()
-        refresh_funds()
+        source = ft.Dropdown(
+            label='Move money from',
+            options=[
+                ft.dropdown.Option(b.name)
+                for b in funds
+            ],
+            value=funds[0].name,
+        )
 
-    # --- Layout ---
-    page.add(ft.Column([
-        ft.Text("Sinking Funds Dashboard", size=24, weight="bold"),
-        funds_chart,
-        name_input,
-        amount_input,
-        frequency_input,
-        ft.Column([ft.Text("Next Due Date"), due_date_input]),
-        ft.ElevatedButton("Add Fund", on_click=add_fund),
-        ft.Divider(height=20),
-        funds_column,
-        total_text
-    ], spacing=10))
+        destination = ft.Dropdown(
+            label='Move money to',
+            options=[
+                ft.dropdown.Option(b.name)
+                for b in funds
+            ],
+            value=funds[1].name,
+        )
 
-    refresh_funds()
+        amount = ft.TextField(
+            label='Amount ($)',
+            keyboard_type=ft.KeyboardType.NUMBER,
+        )
+        error = ft.Text(color='#DC2626', size=12)
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text('Move money'),
+            content=ft.Column(
+                [source, destination, amount, error],
+                tight=True,
+                width=320,
+            ),
+        )
+
+        def transfer(e):
+            try:
+                value = float(amount.value or '0')
+                if value <= 0:
+                    raise ValueError
+            except ValueError:
+                error.value = 'Enter an amount greater than zero.'
+                page.update()
+                return
+
+            src = next(
+                b for b in funds if b.name == source.value
+            )
+            dst = next(
+                b for b in funds if b.name == destination.value
+            )
+
+            if src is dst:
+                error.value = 'Choose two different funds.'
+                page.update()
+                return
+
+            if value > src.balance:
+                error.value = 'Insufficient funds in that fund.'
+                page.update()
+                return
+
+            src.balance -= value
+            dst.balance += value
+
+            close_dialog(dialog)
+            refresh()
+
+        dialog.actions = [
+            ft.TextButton(
+                'Cancel',
+                on_click=lambda e: close_dialog(dialog),
+            ),
+            ft.FilledButton(
+                'Transfer',
+                on_click=transfer,
+            ),
+        ]
+
+        page.show_dialog(dialog)
+
+    # ---------- Header ----------
+
+    header = ft.Container(
+        content=ft.Row(
+            [
+                ft.Container(
+                    content=ft.Icon(
+                        ft.Icons.ACCOUNT_BALANCE_WALLET,
+                        size=23,
+                    ),
+                    bgcolor=BLUE,
+                    border_radius=12,
+                    padding=10,
+                ),
+                ft.Column(
+                    [
+                        ft.Text(
+                            'Savings Funds',
+                            size=20,
+                            weight=ft.FontWeight.BOLD,
+                        ),
+                        ft.Text(
+                            'Give every dollar a purpose.',
+                            size=12,
+                        ),
+                    ],
+                    spacing=2,
+                    expand=True,
+                ),
+                ft.IconButton(
+                    icon=ft.Icons.SETTINGS_OUTLINED,
+                    tooltip='Settings',
+                    icon_color='#64748B',
+                ),
+            ],
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        ),
+        padding=20,
+        border=ft.Border.only(
+            bottom=ft.BorderSide(1, '#E9EDF2')
+        ),
+    )
+
+    # ---------- Savings summary ----------
+
+    summary = ft.Container(
+        content=ft.Column(
+            [
+                ft.Row(
+                    [
+                        ft.Column(
+                            [
+                                ft.Text(
+                                    'TOTAL SAVINGS',
+                                    size=11,
+                                    weight=ft.FontWeight.BOLD,
+                                ),
+                                total_text,
+                            ],
+                            spacing=6,
+                            expand=True,
+                        ),
+                        ft.Container(
+                            content=ft.Icon(
+                                ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED,
+                                size=26,
+                            ),
+                            border_radius=14,
+                            padding=14,
+                        ),
+                    ],
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                allocation_text,
+                allocation_progress,
+                unallocated_text,
+            ],
+            spacing=12,
+        ),
+        border=ft.Border.all(1, '#E9EDF2'),
+        border_radius=18,
+        padding=22,
+    )
+
+    heading = ft.Row(
+        [
+            ft.Column(
+                [
+                    ft.Text(
+                        'Your funds',
+                        size=19,
+                        weight=ft.FontWeight.BOLD,
+                    ),
+                    ft.Text(
+                        'Track progress toward what matters.',
+                        size=12,
+                    ),
+                ],
+                spacing=4,
+                expand=True,
+            ),
+            ft.FilledButton(
+                'Add fund',
+                icon=ft.Icons.ADD,
+                on_click=open_add_fund,
+            ),
+        ],
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    )
+
+    actions = ft.Row(
+        [
+            ft.OutlinedButton(
+                'Add fund',
+                icon=ft.Icons.ADD_CIRCLE_OUTLINE,
+                on_click=open_add_fund,
+                expand=True,
+            ),
+            ft.OutlinedButton(
+                'Move money',
+                icon=ft.Icons.SWAP_HORIZ,
+                on_click=open_move_money,
+                expand=True,
+            ),
+        ],
+        spacing=12,
+    )
+
+    dashboard = ft.Container(
+        content=ft.Column(
+            [
+                summary,
+                heading,
+                fund_list,
+                actions,
+                ft.Text(
+                    'Demo data only · Not saved after restarting',
+                    size=11,
+                    color='#94A3B8',
+                    text_align=ft.TextAlign.CENTER,
+                ),
+            ],
+            spacing=18,
+        ),
+        width=760,
+        padding=24,
+    )
+
+    page.add(
+        header,
+        ft.Row(
+            [dashboard],
+            alignment=ft.MainAxisAlignment.CENTER,
+            vertical_alignment=ft.CrossAxisAlignment.START,
+        ),
+    )
+
+    refresh()
 
 
-ft.app(target=main)
+if __name__ == '__main__':
+    ft.run(main)
