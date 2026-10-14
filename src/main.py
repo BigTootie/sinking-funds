@@ -1,21 +1,21 @@
+from pathlib import Path
+
 import flet as ft
 
 import colors
 from fund import Fund
-from data import load_funds_from_json
-from ui_components import (BASIC_PROGRESS_BAR, PAGE_HEADER, TOTAL_SAVINGS_SUMMARY, refresh_summary,
-                           create_fund_card)
+from data import load_funds_from_json, save_funds_to_json
+from ui_components import (PAGE_HEADER, TOTAL_SAVINGS_SUMMARY, refresh_summary,
+                           create_fund_card, open_add_fund)
 
 # TODO: Eliminate this
-FUNDS_FILE = 'funds.json'
-ACCOUNT_BALANCE = 25000
+FUNDS_FILE = f'{Path(__file__).parent.parent}/funds.json'
+FUNDS = load_funds_from_json(FUNDS_FILE)
 
 PRIMARY_COLOR_SCHEME = ft.ColorScheme(primary=colors.BLUE, surface=colors.SURFACE)
 
 
 def main(PAGE: ft.Page):
-
-    funds = load_funds_from_json(FUNDS_FILE)
 
     PAGE.title = 'Savings Funds'
     PAGE.theme_mode = ft.ThemeMode.DARK
@@ -23,71 +23,44 @@ def main(PAGE: ft.Page):
     PAGE.theme = ft.Theme(color_scheme=PRIMARY_COLOR_SCHEME)
     PAGE.scroll = ft.ScrollMode.AUTO
 
-    # ---------- Dashboard components ----------
+    ACCOUNT_FUND = Fund('Total Account', sum(fund.balance for fund in FUNDS))
+    ACCOUNT_BALANCE_INPUT = ft.TextField(label='Account balance ($)', value='',
+                                         keyboard_type=ft.KeyboardType.NUMBER)
+    ACCOUNT_BALANCE_ERROR = ft.Text(color=colors.RED)
+    ACCOUNT_BALANCE_INPUT_DIALOGUE = \
+        ft.AlertDialog(modal=True, title=ft.Text('Enter your current account balance'),
+                       content=ft.Column([ACCOUNT_BALANCE_INPUT, ACCOUNT_BALANCE_ERROR],
+                                         tight=True, width=320))
+    def update_account_balance(e):
+        try:
+            ACCOUNT_FUND.balance = float(ACCOUNT_BALANCE_INPUT.value)
+            if ACCOUNT_FUND.balance <= 0:
+                raise ValueError
+        except ValueError:
+            ACCOUNT_BALANCE_ERROR.value = 'Enter a valid account balance amount.'
+            PAGE.update()
+            return
 
+        PAGE.pop_dialog()
+        refresh_page()
+
+    ACCOUNT_BALANCE_INPUT_DIALOGUE.actions = \
+        [ft.FilledButton('Done', on_click=update_account_balance)]
+    PAGE.show_dialog(ACCOUNT_BALANCE_INPUT_DIALOGUE)
 
     FUND_CARDS = ft.Column(spacing=12)
 
     def refresh_page():
-        allocated = sum(b.balance for b in funds)
-        refresh_summary(ACCOUNT_BALANCE, allocated)
-
-        BASIC_PROGRESS_BAR.value = \
-            min(allocated / ACCOUNT_BALANCE, 1) if ACCOUNT_BALANCE > 0 else 0
-
-        FUND_CARDS.controls = [create_fund_card(b) for b in funds]
+        allocated = sum(fund.balance for fund in FUNDS)
+        refresh_summary(ACCOUNT_FUND.balance, allocated)
+        FUND_CARDS.controls = [create_fund_card(fund, FUNDS, PAGE, refresh_page) for fund in FUNDS]
         PAGE.update()
-
-    # ---------- Dialog helpers ----------
-
-    def close_dialog(dialog):
-        PAGE.pop_dialog()
-
-    def open_add_fund(e):
-        name_input = ft.TextField(label='Fund name')
-        target_input = ft.TextField(label='Savings target ($)', value='0',
-                                    keyboard_type=ft.KeyboardType.NUMBER)
-        error = ft.Text(color=colors.RED)
-
-        dialog = ft.AlertDialog(
-            modal=True,
-            title=ft.Text('Add a fund'),
-            content=ft.Column([name_input, target_input, error], tight=True, width=320),
-        )
-
-        def save_fund(e):
-            name = (name_input.value or '').strip()
-
-            try:
-                target = float(target_input.value or '0')
-                if target < 0:
-                    raise ValueError
-            except ValueError:
-                error.value = 'Enter a valid target amount.'
-                PAGE.update()
-                return
-
-            if not name:
-                error.value = 'Enter a fund name.'
-                PAGE.update()
-                return
-
-            funds.append(Fund(name, target, 0.0))
-
-            close_dialog(dialog)
-            refresh_page()
-
-        dialog.actions = [
-            ft.TextButton('Cancel', on_click=lambda e: close_dialog(dialog)),
-            ft.FilledButton('Add fund', on_click=save_fund),
-        ]
-
-        PAGE.show_dialog(dialog)
-
-
+        save_funds_to_json(FUNDS, FUNDS_FILE)
 
     ACTION_BUTTONS = ft.Row([ft.OutlinedButton('Add fund', icon=ft.Icons.ADD_CIRCLE_OUTLINE,
-                                               on_click=open_add_fund, expand=True),
+                                               on_click=lambda e: open_add_fund(e, PAGE, FUNDS,
+                                                                                refresh_page),
+                                               expand=True),
                             ], spacing=12)
 
     DASHBOARD = \
