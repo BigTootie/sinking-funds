@@ -23,7 +23,7 @@ def main(PAGE: ft.Page):
     PAGE.theme = ft.Theme(color_scheme=PRIMARY_COLOR_SCHEME)
     PAGE.scroll = ft.ScrollMode.AUTO
 
-    ACCOUNT_FUND = Fund('Total Account', sum(fund.balance for fund in FUNDS))
+    ACCOUNT_FUND = Fund('Total Account', max(sum(fund.balance for fund in FUNDS), 0.01))
     ACCOUNT_BALANCE_INPUT = ft.TextField(label='Account balance ($)', value='',
                                          keyboard_type=ft.KeyboardType.NUMBER)
     ACCOUNT_BALANCE_ERROR = ft.Text(color=colors.RED)
