@@ -3,19 +3,19 @@ name = "sinking-funds-python"
 version = "0.1.0"
 description = ""
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 authors = [
     { name = "Flet developer", email = "you@example.com" }
 ]
 dependencies = [
-    "flet>=0.82.2"
+    "flet>=1.0.4"
 ]
 
 [dependency-groups]
 dev = [
-    "flet-cli>=0.82.2",
-    "flet-desktop-light>=0.82.2",
-    "flet-web>=0.82.2",
+    "flet-cli>=1.0.4",
+    "flet-desktop>=1.0.4",
+    "flet-web>=1.0.4",
 ]
 
 [tool.flet]
