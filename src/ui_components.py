@@ -31,9 +31,9 @@ account_balance_input = ft.TextField(label='Account balance ($)', value='',
                                      keyboard_type=ft.KeyboardType.NUMBER)
 account_balance_error = ft.Text(color=colors.RED)
 AccountBalanceInputDialogue = \
-    ft.AlertDialog(modal=True, title=ft.Text('Enter your current account balance'),
-                   content=ft.Column([account_balance_input, account_balance_error],
-                                     tight=True, width=320))
+    ft.AlertDialog(content=ft.Column([account_balance_input, account_balance_error],
+                                     tight=True, width=320),
+                   modal=True)
 
 
 def save_account_balance(set_account_balance, PAGE):
