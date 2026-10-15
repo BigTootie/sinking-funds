@@ -3,10 +3,13 @@ from pathlib import Path
 import flet as ft
 
 import colors
-from data import load_funds_from_json, save_funds_to_json
-from ui_components import (prompt_for_account_balance, PageHeader, SavingsSummary, FundCard,
+from data import (load_balance_from_txt, save_balance_to_txt,
+                  load_funds_from_json, save_funds_to_json)
+from ui_components import (PageHeader, SavingsSummary, FundCard,
+                           prompt_for_account_balance, open_modify_account_balance,
                            open_add_fund, open_modify_fund)
 
+ACCOUNT_BALANCE_FILE = Path(__file__).parent.parent / 'balance.txt'
 FUNDS_FILE = Path(__file__).parent.parent / 'funds.json'
 
 
@@ -14,21 +17,45 @@ class SavingsFundsApp:
     """
     This class handles high-level setup and state management of the saving funds app
     """
-
     def __init__(self, page: ft.Page):
+        # Initialize the page
         self.page = page
+        self._initialize_page()
 
         # Load the previously stored funds
         self.funds = load_funds_from_json(str(FUNDS_FILE))
-        # Initialize the savings summary section
-        self.summary = SavingsSummary()
 
-        # Prompt the user to input their total account balance
-        prompt_for_account_balance(self.set_account_balance, self.page, self.initialize_page)
+        # Prompt the user to input their total account balance if we don't already have one
+        self.account_balance = load_balance_from_txt(ACCOUNT_BALANCE_FILE)
+        if self.account_balance < 0:
+            prompt_for_account_balance(self.set_account_balance, self.page,
+                                       self.initialize_dashboard)
+        # Otherwise, go ahead and initialize the dashboard
+        else:
+            self.initialize_dashboard()
+
+    # Initialization for the entire page
+    def _initialize_page(self):
+        # Set page title and color scheme
+        self.page.title = 'Savings Funds'
+        self.page.theme_mode = ft.ThemeMode.DARK
+        self.page.bgcolor = colors.BACKGROUND
+        self.page.theme = \
+            ft.Theme(color_scheme=ft.ColorScheme(primary=colors.BLUE, surface=colors.SURFACE))
+        self.page.scroll = ft.ScrollMode.AUTO
+
+        # Adjust sizes of items when the page is resized
+        self.page.on_resized = lambda e: self._set_dashboard_width_and_padding()
+
+        # Add the header and setup the dashboard
+        self.page.add(PageHeader)
 
     # Setter for account balance
     def set_account_balance(self, value):
         self.account_balance = value
+
+        # Save off the new account balance anytime it is updated
+        save_balance_to_txt(self.account_balance, ACCOUNT_BALANCE_FILE)
 
     # Refresh routine for the fund cards section
     def _refresh_fund_cards(self):
@@ -43,9 +70,12 @@ class SavingsFundsApp:
         self.fund_cards_column.controls = [fund_card.control for fund_card in self.fund_cards]
 
     # Initialization for the dashboard section
-    def _initialize_dashboard(self):
-        # Load values into the savings summary section
+    def initialize_dashboard(self):
+        # Initialize the savings summary section
+        self.summary = SavingsSummary()
         self.summary.refresh(self.account_balance, sum(fund.balance for fund in self.funds))
+        self.summary.control.on_click = lambda e: \
+            open_modify_account_balance(self.set_account_balance, self.page, self.refresh_page)
 
         # Create the "Add fund" button
         action_buttons = \
@@ -71,23 +101,6 @@ class SavingsFundsApp:
         # Add the dashboard to the page
         self.page.add(ft.Row([self.dashboard], alignment=ft.MainAxisAlignment.CENTER,
                              vertical_alignment=ft.CrossAxisAlignment.START, expand=True))
-
-    # Initialization for the entire page
-    def initialize_page(self):
-        # Set page title and color scheme
-        self.page.title = 'Savings Funds'
-        self.page.theme_mode = ft.ThemeMode.DARK
-        self.page.bgcolor = colors.BACKGROUND
-        self.page.theme = \
-            ft.Theme(color_scheme=ft.ColorScheme(primary=colors.BLUE, surface=colors.SURFACE))
-        self.page.scroll = ft.ScrollMode.AUTO
-
-        # Adjust sizes of items when the page is resized
-        self.page.on_resized = lambda e: self._set_dashboard_width_and_padding()
-
-        # Add the header and setup the dashboard
-        self.page.add(PageHeader)
-        self._initialize_dashboard()
 
     # Refresher for all dynamic page elements
     def refresh_page(self):
