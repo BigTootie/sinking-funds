@@ -5,34 +5,6 @@ from utils import money_format
 from fund import Fund
 
 
-def prompt_for_account_balance(set_account_balance, PAGE, initialize_page):
-    account_balance_input = ft.TextField(label='Account balance ($)', value='',
-                                         keyboard_type=ft.KeyboardType.NUMBER)
-    account_balance_error = ft.Text(color=colors.RED)
-
-    def save_account_balance(e):
-        try:
-            balance = float(account_balance_input.value)
-            if balance <= 0:
-                raise ValueError
-        except (ValueError, TypeError):
-            account_balance_error.value = 'Enter a valid account balance amount.'
-            PAGE.update()
-            return
-
-        set_account_balance(balance)
-        PAGE.pop_dialog()
-        initialize_page()
-
-    AccountBalanceInputDialogue = \
-        ft.AlertDialog(modal=True, title=ft.Text('Enter your current account balance'),
-                       content=ft.Column([account_balance_input, account_balance_error],
-                                         tight=True, width=320),
-                       actions=[ft.FilledButton('Done', on_click=save_account_balance)])
-
-    PAGE.show_dialog(AccountBalanceInputDialogue)
-
-
 PageHeader = ft.Container(
     content=ft.Row(
         [
@@ -53,6 +25,53 @@ PageHeader = ft.Container(
     ),
     padding=20,
     border=ft.Border.only(bottom=ft.BorderSide(1, colors.BORDER)))
+
+
+account_balance_input = ft.TextField(label='Account balance ($)', value='',
+                                     keyboard_type=ft.KeyboardType.NUMBER)
+account_balance_error = ft.Text(color=colors.RED)
+AccountBalanceInputDialogue = \
+    ft.AlertDialog(modal=True, title=ft.Text('Enter your current account balance'),
+                   content=ft.Column([account_balance_input, account_balance_error],
+                                     tight=True, width=320))
+
+
+def save_account_balance(set_account_balance, PAGE):
+    try:
+        balance = float(account_balance_input.value)
+        if balance <= 0:
+            raise ValueError
+    except (ValueError, TypeError):
+        account_balance_error.value = 'Enter a valid account balance amount.'
+        PAGE.update()
+        return False
+
+    set_account_balance(balance)
+    PAGE.pop_dialog()
+    return True
+
+
+def prompt_for_account_balance(set_account_balance, PAGE, initialize_dashboard):
+    def save_account_balance_and_initialize(e):
+        success = save_account_balance(set_account_balance, PAGE)
+        if success:
+            initialize_dashboard()
+
+    AccountBalanceInputDialogue.title = 'Enter your current account balance'
+    AccountBalanceInputDialogue.actions = \
+        [ft.FilledButton('Done', on_click=save_account_balance_and_initialize)]
+    PAGE.show_dialog(AccountBalanceInputDialogue)
+
+
+def open_modify_account_balance(set_account_balance, PAGE, refresh_page):
+    def save_account_balance_and_refresh(e):
+        success = save_account_balance(set_account_balance, PAGE)
+        if success:
+            refresh_page()
+    AccountBalanceInputDialogue.title = 'Modify account balance'
+    AccountBalanceInputDialogue.actions = \
+        [ft.FilledButton('Done', on_click=save_account_balance_and_refresh)]
+    PAGE.show_dialog(AccountBalanceInputDialogue)
 
 
 class SavingsSummary:
