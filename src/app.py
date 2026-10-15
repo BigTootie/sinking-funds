@@ -40,16 +40,16 @@ class SavingsFundsApp:
         self.fund_cards_column = ft.Column(spacing=12)
         self._refresh_fund_cards()
 
-        dashboard = \
+        self.dashboard = \
             ft.Container(content=ft.Column([self.summary.control,
                                             action_buttons,
                                             self.fund_cards_column],
-                                           spacing=18),
-                         width=760,
-                         padding=24)
+                                           spacing=18,
+                                           horizontal_alignment=ft.CrossAxisAlignment.STRETCH))
+        self._set_dashboard_width_and_padding()
 
-        self.page.add(ft.Row([dashboard], alignment=ft.MainAxisAlignment.CENTER,
-                             vertical_alignment=ft.CrossAxisAlignment.START))
+        self.page.add(ft.Row([self.dashboard], alignment=ft.MainAxisAlignment.CENTER,
+                             vertical_alignment=ft.CrossAxisAlignment.START, expand=True))
 
     def initialize_page(self):
         self.page.title = 'Savings Funds'
@@ -58,6 +58,7 @@ class SavingsFundsApp:
         self.page.theme = \
             ft.Theme(color_scheme=ft.ColorScheme(primary=colors.BLUE, surface=colors.SURFACE))
         self.page.scroll = ft.ScrollMode.AUTO
+        self.page.on_resized = lambda e: self._set_dashboard_width_and_padding()
         self.page.add(PageHeader)
         self._initialize_dashboard()
 
@@ -66,3 +67,13 @@ class SavingsFundsApp:
         self._refresh_fund_cards()
         self.page.update()
         save_funds_to_json(self.funds, str(FUNDS_FILE))
+
+    def _set_dashboard_width_and_padding(self):
+        screen_width = self.page.width
+        is_mobile = screen_width < 600
+        margin = 12 if is_mobile else 24
+
+        self.dashboard.width = min(760, max(screen_width - 2 * margin, 0))
+        self.dashboard.padding = margin
+
+        self.page.update()

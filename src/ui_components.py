@@ -72,7 +72,7 @@ class SavingsSummary:
                         ], vertical_alignment=ft.CrossAxisAlignment.CENTER),
                 self.total_allocated_text,
                 self.progress_bar,
-                self.total_unallocated_text], spacing=12),
+                self.total_unallocated_text], spacing=12, expand=True),
             border=ft.Border.all(1, colors.BORDER), border_radius=18, padding=22)
 
     def refresh(self, total_savings: float, total_allocated: float) -> None:
@@ -90,22 +90,23 @@ class FundCard:
         self.fund = fund
         self.icon_box = ft.Container(content=ft.Icon(ft.Icons.SHIELD, size=24),
                                      bgcolor=colors.SURFACE, border_radius=12, padding=11)
-        self.name_text = ft.Text(size=15, weight=ft.FontWeight.W_600)
-        self.target_text = ft.Text(size=12)
+        self.name_text = ft.Text(size=15, weight=ft.FontWeight.W_600, expand=True)
+        self.target_text = ft.Text(size=12, expand=True)
         self.progress_bar = ft.ProgressBar(height=6, border_radius=10, color=colors.BLUE,
-                                           bgcolor=colors.BORDER)
-        self.balance_text = ft.Text(size=16, weight=ft.FontWeight.BOLD)
-        self.funded_text = ft.Text(size=12)
+                                           bgcolor=colors.BORDER, expand=True)
+        self.balance_text = ft.Text(size=16, weight=ft.FontWeight.BOLD, expand=True)
+        self.funded_text = ft.Text(size=12, expand=True)
         self.control = ft.Container(
             content=ft.Column(
                 [ft.Row([self.icon_box,
                          ft.Column([self.name_text, self.target_text], spacing=4, expand=True),
                          ft.Column([self.balance_text, self.funded_text], spacing=4,
-                                   horizontal_alignment=ft.CrossAxisAlignment.END)
+                                   horizontal_alignment=ft.CrossAxisAlignment.END, expand=True)
                          ], spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER),
                  self.progress_bar,
-                ], spacing=14),
-            border=ft.Border.all(1, colors.BORDER), border_radius=16, padding=16)
+                ], spacing=14, expand=True),
+            border=ft.Border.all(1, colors.BORDER), border_radius=16, padding=16,
+            expand=True)
 
         self.refresh()
 
