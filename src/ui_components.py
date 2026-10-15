@@ -70,7 +70,9 @@ def open_modify_account_balance(set_account_balance, PAGE, refresh_page):
             refresh_page()
     AccountBalanceInputDialogue.title = 'Modify account balance'
     AccountBalanceInputDialogue.actions = \
-        [ft.FilledButton('Done', on_click=save_account_balance_and_refresh)]
+        [ft.TextButton('Cancel', on_click=lambda e: PAGE.pop_dialog()),
+         ft.FilledButton('Done', on_click=save_account_balance_and_refresh)]
+
     PAGE.show_dialog(AccountBalanceInputDialogue)
 
 
