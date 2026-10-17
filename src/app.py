@@ -7,7 +7,7 @@ from data import (load_balance_from_txt, save_balance_to_txt,
                   load_funds_from_json, save_funds_to_json)
 from ui_components import (PageHeader, SavingsSummary, FundCard,
                            prompt_for_account_balance, open_modify_account_balance,
-                           open_add_fund, open_modify_fund)
+                           open_add_fund_dialogue, open_modify_fund_dialogue)
 
 ACCOUNT_BALANCE_FILE = Path(__file__).parent.parent / 'balance.txt'
 FUNDS_FILE = Path(__file__).parent.parent / 'funds.json'
@@ -47,7 +47,7 @@ class SavingsFundsApp:
         # Adjust sizes of items when the page is resized
         self.page.on_resized = lambda e: self._set_dashboard_width_and_padding()
 
-        # Add the header and setup the dashboard
+        # Add the header
         self.page.add(PageHeader)
 
     # Setter for account balance
@@ -64,7 +64,7 @@ class SavingsFundsApp:
         # Set the action to open the fund modifier dialogue when a fund card is clicked on
         for fund_card in self.fund_cards:
             fund_card.control.on_click = lambda e, fund=fund_card.fund: \
-                open_modify_fund(self.page, self.funds, fund, self.refresh_page)
+                open_modify_fund_dialogue(self.page, self.funds, fund, self.refresh_page)
 
         # Update the content of the fund cards column
         self.fund_cards_column.controls = [fund_card.control for fund_card in self.fund_cards]
@@ -79,10 +79,10 @@ class SavingsFundsApp:
 
         # Create the "Add fund" button
         action_buttons = \
-            ft.Row([ft.OutlinedButton('Add fund', icon=ft.Icons.ADD_CIRCLE_OUTLINE,
-                                      on_click=lambda e: open_add_fund(e, self.page, self.funds,
-                                                                       self.refresh_page),
-                                      expand=True)
+            ft.Row([ft.OutlinedButton('Add fund', icon=ft.Icons.ADD_CIRCLE_OUTLINE, expand=True,
+                                      on_click=lambda e: open_add_fund_dialogue(self.page,
+                                                                                self.funds,
+                                                                                self.refresh_page))
                    ], spacing=12)
 
         # Initialize the fund cards section
@@ -111,7 +111,7 @@ class SavingsFundsApp:
         # Save the current Fund objects each time the page is refreshed
         save_funds_to_json(self.funds, str(FUNDS_FILE))
 
-    # Special handling for differenct screen sizes
+    # Special handling for different screen sizes
     def _set_dashboard_width_and_padding(self):
         screen_width = self.page.width
         is_mobile = screen_width < 600

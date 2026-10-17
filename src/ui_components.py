@@ -1,3 +1,6 @@
+from datetime import datetime
+from copy import deepcopy
+
 import flet as ft
 
 import colors
@@ -5,6 +8,7 @@ from utils import money_format
 from fund import Fund
 
 
+# Define the static page header
 PageHeader = ft.Container(
     content=ft.Row(
         [
@@ -27,6 +31,7 @@ PageHeader = ft.Container(
     border=ft.Border.only(bottom=ft.BorderSide(1, colors.BORDER)))
 
 
+# Define the base account balance input dialogue
 account_balance_input = ft.TextField(label='Account balance ($)', value='',
                                      keyboard_type=ft.KeyboardType.NUMBER)
 account_balance_error = ft.Text(color=colors.RED)
@@ -36,46 +41,50 @@ AccountBalanceInputDialogue = \
                    modal=True)
 
 
-def save_account_balance(set_account_balance, PAGE):
+# Function to save user's account balance input to the app state
+def save_account_balance(set_account_balance, page):
     try:
         balance = float(account_balance_input.value)
         if balance <= 0:
             raise ValueError
     except (ValueError, TypeError):
         account_balance_error.value = 'Enter a valid account balance amount.'
-        PAGE.update()
+        page.update()
         return False
 
     set_account_balance(balance)
-    PAGE.pop_dialog()
+    page.pop_dialog()
     return True
 
 
-def prompt_for_account_balance(set_account_balance, PAGE, initialize_dashboard):
+# Initial prompt when account balance has not yet been provided
+def prompt_for_account_balance(set_account_balance, page, initialize_dashboard):
     def save_account_balance_and_initialize(e):
-        success = save_account_balance(set_account_balance, PAGE)
+        success = save_account_balance(set_account_balance, page)
         if success:
             initialize_dashboard()
 
     AccountBalanceInputDialogue.title = 'Enter your current account balance'
     AccountBalanceInputDialogue.actions = \
         [ft.FilledButton('Done', on_click=save_account_balance_and_initialize)]
-    PAGE.show_dialog(AccountBalanceInputDialogue)
+    page.show_dialog(AccountBalanceInputDialogue)
 
 
-def open_modify_account_balance(set_account_balance, PAGE, refresh_page):
+# Modifier for account balance
+def open_modify_account_balance(set_account_balance, page, refresh_page):
     def save_account_balance_and_refresh(e):
-        success = save_account_balance(set_account_balance, PAGE)
+        success = save_account_balance(set_account_balance, page)
         if success:
             refresh_page()
     AccountBalanceInputDialogue.title = 'Modify account balance'
     AccountBalanceInputDialogue.actions = \
-        [ft.TextButton('Cancel', on_click=lambda e: PAGE.pop_dialog()),
+        [ft.TextButton('Cancel', on_click=lambda e: page.pop_dialog()),
          ft.FilledButton('Done', on_click=save_account_balance_and_refresh)]
 
-    PAGE.show_dialog(AccountBalanceInputDialogue)
+    page.show_dialog(AccountBalanceInputDialogue)
 
 
+# Definition of savings summary section
 class SavingsSummary:
     def __init__(self):
         self.total_savings_text = ft.Text(size=32, weight=ft.FontWeight.BOLD)
@@ -106,6 +115,7 @@ class SavingsSummary:
             min(total_allocated / total_savings, 1) if total_savings > 0 else 0
 
 
+# Definition of cards that display each fund's information
 class FundCard:
     def __init__(self, fund: Fund):
         self.fund = fund
@@ -113,10 +123,10 @@ class FundCard:
                                      bgcolor=colors.SURFACE, border_radius=12, padding=11)
         self.name_text = ft.Text(size=15, weight=ft.FontWeight.W_600, expand=True)
         self.target_text = ft.Text(size=12, expand=True)
-        self.progress_bar = ft.ProgressBar(height=6, border_radius=10, color=colors.BLUE,
-                                           bgcolor=colors.BORDER, expand=True)
         self.balance_text = ft.Text(size=16, weight=ft.FontWeight.BOLD, expand=True)
         self.funded_text = ft.Text(size=12, expand=True)
+        self.progress_bar = ft.ProgressBar(height=6, border_radius=10, color=colors.BLUE,
+                                           bgcolor=colors.BORDER, expand=True)
         self.control = ft.Container(
             content=ft.Column(
                 [ft.Row([self.icon_box,
@@ -124,11 +134,25 @@ class FundCard:
                          ft.Column([self.balance_text, self.funded_text], spacing=4,
                                    horizontal_alignment=ft.CrossAxisAlignment.END, expand=True)
                          ], spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER),
-                 self.progress_bar,
-                ], spacing=14, expand=True),
-            border=ft.Border.all(1, colors.BORDER), border_radius=16, padding=16,
-            expand=True)
+                 self.progress_bar], spacing=14, expand=True),
+            border=ft.Border.all(1, colors.BORDER), border_radius=16, padding=16, expand=True)
 
+        # Add target date information if one exists for this fund
+        if self.fund.target_date is not None:
+            self.target_date_text = ft.Text(size=12, expand=True)
+            self.on_track_status_text = ft.Text(size=12, expand=True)
+            if self.fund.on_track:
+                self.on_track_status_text.color = colors.GREEN
+            else:
+                self.on_track_status_text.color = colors.RED
+
+            self.control.content.controls.append(
+                 ft.Row([ft.Column([self.target_date_text], spacing=4, expand=True),
+                         ft.Column([self.on_track_status_text], spacing=4,
+                                   horizontal_alignment=ft.CrossAxisAlignment.END, expand=True)
+                         ], spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER))
+
+        # Load the values of all fields
         self.refresh()
 
     def refresh(self) -> None:
@@ -136,31 +160,55 @@ class FundCard:
         self.target_text.value = \
             f'Target {money_format(self.fund.target)}' if self.fund.target > 0 else 'No target set'
         self.balance_text.value = money_format(self.fund.balance)
-        self.funded_text.value = \
-            f'{self.fund.percent_funded:.1f}% funded' if self.fund.target > 0 else 'No target'
-        self.progress_bar.value = min(max(self.fund.percent_funded / 100, 0), 1)
+        self.funded_text.value = f'{self.fund.compute_percent_funded():.1f}% funded' \
+                                 if self.fund.target > 0 else 'No target'
+        self.progress_bar.value = min(max(self.fund.compute_percent_funded() / 100, 0), 1)
+        if self.fund.target_date is not None:
+            self.target_date_text.value = f'Target date: {self.fund.target_date_as_str()} ' \
+                                          f'({self.fund.time_remaining_as_str()})'
+            self.on_track_status_text.value = self.fund.get_on_track_status_as_str()
 
 
-def open_add_fund(e, PAGE, FUNDS, refresh_page):
+# Function to generate and display the "Add fund" dialogue
+def open_add_fund_dialogue(page, funds, refresh_page):
+
+    # Initialize the name, target, balance, and date input fields
     name_input = ft.TextField(label='Fund name')
-    target_input = ft.TextField(label='Savings target ($)', value='',
-                                keyboard_type=ft.KeyboardType.NUMBER)
-    initial_balance_input = ft.TextField(label='Initial balance ($)', value='',
-                                         keyboard_type=ft.KeyboardType.NUMBER)
+    target_input = ft.TextField(label='Savings target ($)', keyboard_type=ft.KeyboardType.NUMBER)
+    balance_input = ft.TextField(label='Current balance ($)', keyboard_type=ft.KeyboardType.NUMBER)
+    recurring_transfer_input = ft.TextField(label='Recurring monthly transfer ($)',
+                                            keyboard_type=ft.KeyboardType.NUMBER)
+
+    # Date selector button which spawns the date picker dialogue
+    def open_date_picker(e):
+        page.show_dialog(date_picker)
+
+    date_select_button = ft.Button(content='Target date: None', icon=ft.Icons.CALENDAR_MONTH,
+                                   on_click=open_date_picker)
+
+    # Define a function for the date picker to use to save the date selected
+    target_date = None
+    def set_date(e):
+        nonlocal target_date
+        target_date = e.control.value
+        date_select_button.content = 'Target date: ' + target_date.strftime('%m/%d/%Y')
+        page.update()
+
+    # Setup datepicker dialogue for add/modify fund dialogues
+    today = datetime.today()
+    date_picker = ft.DatePicker(first_date=datetime(year=today.year - 1, month=1, day=1),
+                                last_date=datetime(year=today.year + 1, month=today.month, day=20),
+                                current_date=today, on_change=set_date)
+
+    # Error message text field
     error = ft.Text(color=colors.RED)
 
-    dialog = ft.AlertDialog(
-        modal=True,
-        title=ft.Text('Add a fund'),
-        content=ft.Column([name_input, target_input, initial_balance_input, error],
-                          tight=True, width=320),
-    )
-
+    # Define a function to handle saving the new fund
     def save_fund(e):
         name = (name_input.value or '').strip()
         if not name:
             error.value = 'Enter a fund name.'
-            PAGE.update()
+            page.update()
             return
 
         try:
@@ -169,53 +217,83 @@ def open_add_fund(e, PAGE, FUNDS, refresh_page):
                 raise ValueError
         except ValueError:
             error.value = 'Enter a valid target amount.'
-            PAGE.update()
+            page.update()
             return
 
         try:
-            initial_balance = float(initial_balance_input.value or '0')
+            initial_balance = float(balance_input.value or '0')
         except ValueError:
             error.value = 'Enter a valid initial balance amount.'
-            PAGE.update()
+            page.update()
             return
 
-        FUNDS.append(Fund(name, target, initial_balance))
-        PAGE.pop_dialog()
+        try:
+            recurring_transfer = float(recurring_transfer_input.value or '0')
+        except ValueError:
+            error.value = 'Enter a valid recurring transfer amount.'
+            page.update()
+            return
+
+        funds.append(Fund(name, target, initial_balance, target_date, recurring_transfer))
+        page.pop_dialog()
         refresh_page()
 
-    dialog.actions = [
-        ft.TextButton('Cancel', on_click=lambda e: PAGE.pop_dialog()),
-        ft.FilledButton('Add fund', on_click=save_fund),
-    ]
+    # Define the "Add fund" dialogue and display it
+    AddFundDialogue = \
+        ft.AlertDialog(title='Add fund', modal=True,
+                       content=ft.Column([name_input, target_input, balance_input,
+                                          recurring_transfer_input, date_select_button, error],
+                                         tight=True, width=320),
+                       actions=[ft.TextButton('Cancel', on_click=lambda e: page.pop_dialog()),
+                                ft.FilledButton('Save', on_click=save_fund)])
 
-    PAGE.show_dialog(dialog)
+    page.show_dialog(AddFundDialogue)
 
 
-def open_modify_fund(PAGE, FUNDS, fund, refresh_page):
-    name_input = ft.TextField(label='Fund name', value=fund.name)
-    target_input = ft.TextField(label='Savings target ($)', value=fund.target,
+# Function to generate and display the "Modify fund" dialogue
+def open_modify_fund_dialogue(page, funds, fund, refresh_page):
+
+    # Pre-fill the name, target, balance, and date input fields with the current values from
+    # the fund
+    name_input = ft.TextField(fund.name, label='Fund name')
+    target_input = ft.TextField(fund.target, label='Savings target ($)',
                                 keyboard_type=ft.KeyboardType.NUMBER)
-    balance_input = ft.TextField(label='Balance ($)', value=fund.balance,
+    balance_input = ft.TextField(fund.balance, label='Current balance ($)',
                                  keyboard_type=ft.KeyboardType.NUMBER)
+    recurring_transfer_input = ft.TextField(fund.recurring_transfer,
+                                            label='Recurring monthly transfer ($)',
+                                            keyboard_type=ft.KeyboardType.NUMBER)
+
+    # Date selector button which spawns the date picker dialogue
+    def open_date_picker(e):
+        page.show_dialog(date_picker)
+
+    date_select_button = ft.Button(content='Target date: ' + fund.target_date_as_str(),
+                                   icon=ft.Icons.CALENDAR_MONTH, on_click=open_date_picker)
+
+    # Define a function for the date picker to use to save the date selected
+    new_target_date = fund.target_date
+    def set_date(e):
+        nonlocal new_target_date
+        new_target_date = e.control.value
+        date_select_button.content = 'Target date: ' + new_target_date.strftime('%m/%d/%Y')
+        page.update()
+
+    # Setup datepicker dialogue for add/modify fund dialogues
+    today = datetime.today()
+    date_picker = ft.DatePicker(first_date=datetime(year=today.year - 1, month=1, day=1),
+                                last_date=datetime(year=today.year + 1, month=today.month, day=20),
+                                current_date=today, on_change=set_date)
+
+    # Error message text field
     error = ft.Text(color=colors.RED)
 
-    dialog = ft.AlertDialog(
-        modal=True,
-        title=ft.Text('Modify fund'),
-        content=ft.Column([name_input, target_input, balance_input, error],
-                          tight=True, width=320),
-    )
-
-    def delete_fund(e):
-        FUNDS.remove(fund)
-        PAGE.pop_dialog()
-        refresh_page()
-
+    # Define a function to handle saving changes to the fund
     def save_fund(e):
         name = (name_input.value or '').strip()
         if not name:
             error.value = 'Enter a fund name.'
-            PAGE.update()
+            page.update()
             return
 
         try:
@@ -224,26 +302,45 @@ def open_modify_fund(PAGE, FUNDS, fund, refresh_page):
                 raise ValueError
         except ValueError:
             error.value = 'Enter a valid target amount.'
-            PAGE.update()
+            page.update()
             return
 
         try:
             balance = float(balance_input.value or '0')
         except ValueError:
             error.value = 'Enter a valid initial balance amount.'
-            PAGE.update()
+            page.update()
+            return
+
+        try:
+            recurring_transfer = float(recurring_transfer_input.value or '0')
+        except ValueError:
+            error.value = 'Enter a valid recurring transfer amount.'
+            page.update()
             return
 
         fund.name = name
         fund.set_target(target)
         fund.set_balance(balance)
-        PAGE.pop_dialog()
+        fund.set_target_date(new_target_date)
+        fund.set_recurring_transfer(recurring_transfer)
+        page.pop_dialog()
         refresh_page()
 
-    dialog.actions = [
-        ft.FilledButton('Delete', bgcolor=colors.RED, on_click=delete_fund),
-        ft.TextButton('Cancel', on_click=lambda e: PAGE.pop_dialog()),
-        ft.FilledButton('Save', on_click=save_fund),
-    ]
+    # Define a function to handle fund deletion
+    def delete_fund(e):
+        funds.remove(fund)
+        page.pop_dialog()
+        refresh_page()
 
-    PAGE.show_dialog(dialog)
+    # Define the "Modify fund" dialogue and display it
+    ModifyFundDialogue = \
+        ft.AlertDialog(title='Modify fund', modal=True,
+                       content=ft.Column([name_input, target_input, balance_input,
+                                          recurring_transfer_input, date_select_button, error],
+                                         tight=True, width=320),
+                       actions=[ft.FilledButton('Delete', bgcolor=colors.RED, on_click=delete_fund),
+                                ft.TextButton('Cancel', on_click=lambda e: page.pop_dialog()),
+                                ft.FilledButton('Save', on_click=save_fund)])
+
+    page.show_dialog(ModifyFundDialogue)
