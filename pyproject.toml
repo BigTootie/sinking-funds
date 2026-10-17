@@ -8,7 +8,8 @@ authors = [
     { name = "Flet developer", email = "you@example.com" }
 ]
 dependencies = [
-    "flet>=1.0.4"
+    "flet>=1.0.4",
+    "python-dateutil>=2.9.0.post0"
 ]
 
 [dependency-groups]
