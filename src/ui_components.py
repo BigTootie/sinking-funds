@@ -196,9 +196,9 @@ def open_add_fund_dialogue(page, funds, refresh_page):
 
     # Setup datepicker dialogue for add/modify fund dialogues
     today = datetime.today()
-    date_picker = ft.DatePicker(first_date=datetime(year=today.year - 1, month=1, day=1),
-                                last_date=datetime(year=today.year + 1, month=today.month, day=20),
-                                current_date=today, on_change=set_date)
+    date_picker = ft.DatePicker(first_date=today, current_date=today,
+                                last_date=datetime(year=today.year + 50, month=today.month, day=1),
+                                on_change=set_date)
 
     # Error message text field
     error = ft.Text(color=colors.RED)
@@ -281,9 +281,10 @@ def open_modify_fund_dialogue(page, funds, fund, refresh_page):
 
     # Setup datepicker dialogue for add/modify fund dialogues
     today = datetime.today()
-    date_picker = ft.DatePicker(first_date=datetime(year=today.year - 1, month=1, day=1),
-                                last_date=datetime(year=today.year + 1, month=today.month, day=20),
-                                current_date=today, on_change=set_date)
+    date_picker = ft.DatePicker(first_date=today, current_date=today,
+                                last_date=datetime(year=today.year + 50, month=today.month, day=1),
+                                on_change=set_date)
+
 
     # Error message text field
     error = ft.Text(color=colors.RED)

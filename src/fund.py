@@ -4,6 +4,7 @@ Module containing the Fund class implementation
 from datetime import datetime
 from dateutil import relativedelta
 
+from utils import money_format
 
 class Fund:
     def __init__(self, name: str, target: float, initial_balance: float = 0.0,
@@ -14,7 +15,7 @@ class Fund:
         self.target_date = target_date
         self.time_remaining = self._compute_time_remaining()
         self.recurring_transfer = recurring_transfer
-        self.on_track = self._on_track_for_target()
+        self.on_track, self.required_recurring_transfer = self._on_track_for_target()
 
     def add(self, amount):
         new_balance = self.balance + amount
@@ -26,11 +27,11 @@ class Fund:
 
     def set_target(self, value):
         self.target = value
-        self.on_track = self._on_track_for_target()
+        self.on_track, self.required_recurring_transfer = self._on_track_for_target()
 
     def set_balance(self, value):
         self.balance = value
-        self.on_track = self._on_track_for_target()
+        self.on_track, self.required_recurring_transfer = self._on_track_for_target()
 
     def compute_percent_funded(self):
         return round(self.balance / self.target * 100, 2)
@@ -38,7 +39,7 @@ class Fund:
     def set_target_date(self, date):
         self.target_date = date
         self.time_remaining = self._compute_time_remaining()
-        self.on_track = self._on_track_for_target()
+        self.on_track, self.required_recurring_transfer = self._on_track_for_target()
 
     def _compute_time_remaining(self):
         if self.target_date is None:
@@ -64,15 +65,19 @@ class Fund:
         time_remaining_dict['days'] = self.time_remaining.days
         time_remaining_str = ', '.join([f'{unit_value} {unit_lable}' \
             for unit_lable, unit_value in time_remaining_dict.items() if unit_value != 0])
-        return time_remaining_str + ' remaining'
+
+        if time_remaining_str:
+            return time_remaining_str + ' remaining'
+        else:
+            return 'No time remaining'
 
     def set_recurring_transfer(self, recurring_transfer):
         self.recurring_transfer = recurring_transfer
-        self.on_track = self._on_track_for_target()
+        self.on_track, self.required_recurring_transfer = self._on_track_for_target()
 
     def _on_track_for_target(self):
         if self.time_remaining is None:
-            return None
+            return None, None
 
         # Calculate our remaining balance
         remaining_balance = self.target - self.balance
@@ -83,12 +88,14 @@ class Fund:
         # If we don't have any months left, check to see if we currently have enough money
         if months_remaining == 0:
             if remaining_balance > 0:
-                return False
+                return False, remaining_balance
             else:
-                return True
+                return True, 0
         # Otherwise, check to see if our recurring transfer is high enough to meet the target
         else:
-            return self.recurring_transfer >= remaining_balance / months_remaining
+            required_recurring_transfer = remaining_balance / months_remaining
+            on_track = self.recurring_transfer >= required_recurring_transfer
+            return on_track, required_recurring_transfer
 
     def get_on_track_status_as_str(self):
         match self.on_track:
@@ -97,4 +104,5 @@ class Fund:
             case True:
                 return 'On track to meet target'
             case False:
-                return 'Behind schedule'
+                return f'Contribute {money_format(self.required_recurring_transfer)} / month ' \
+                        'to meet target'
