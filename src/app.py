@@ -48,7 +48,8 @@ class SavingsFundsApp:
         self.page.on_resized = lambda e: self._set_dashboard_width_and_padding()
 
         # Add the header
-        self.page.add(PageHeader)
+        self.page.add(ft.SafeArea(content=PageHeader, avoid_intrusions_bottom=False,
+                                  avoid_intrusions_left=False, avoid_intrusions_right=False))
 
     # Setter for account balance
     def set_account_balance(self, value):
