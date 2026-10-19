@@ -134,8 +134,10 @@ class FundCard:
                          ft.Column([self.balance_text, self.funded_text], spacing=4,
                                    horizontal_alignment=ft.CrossAxisAlignment.END, expand=True)
                          ], spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER),
-                 self.progress_bar], spacing=14, expand=True),
-            border=ft.Border.all(1, colors.BORDER), border_radius=16, padding=16, expand=True)
+                 self.progress_bar],
+                 spacing=14, expand=True, margin=ft.Margin.only(right=22)),
+            border=ft.Border.all(1, colors.BORDER), border_radius=16, padding=16, expand=True,
+            margin=ft.Margin.only(bottom=8))
 
         # Add target date information if one exists for this fund
         if self.fund.target_date is not None:
@@ -234,7 +236,7 @@ def open_add_fund_dialogue(page, funds, refresh_page):
             page.update()
             return
 
-        funds.append(Fund(name, target, initial_balance, target_date, recurring_transfer))
+        funds.insert(0, Fund(name, target, initial_balance, target_date, recurring_transfer))
         page.pop_dialog()
         refresh_page()
 

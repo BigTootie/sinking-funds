@@ -85,8 +85,14 @@ class SavingsFundsApp:
                                                                                 self.refresh_page))
                    ], spacing=12)
 
+        # Define a function to handle fund card reordering
+        def reorder_funds(e):
+            self.funds.insert(e.new_index, self.funds.pop(e.old_index))
+            self.refresh_page()
+
         # Initialize the fund cards section
-        self.fund_cards_column = ft.Column(spacing=12)
+        self.fund_cards_column = ft.ReorderableListView(expand=True, spacing=12,
+                                                        on_reorder=reorder_funds)
         self._refresh_fund_cards()
 
         # Create the dashboard Container object
