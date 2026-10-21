@@ -55,6 +55,15 @@ class SavingsFundsApp:
         if self.nextcloud_sync_data:
             sync_data_from_nextcloud(self.nextcloud_sync_data)
 
+    async def _sync_file(self, file_path, sync_data):
+        try:
+            await asyncio.to_thread(sync_data_to_nextcloud, file_path, sync_data)
+        except Exception as exc:
+            print(f'Nextcloud sync failed for {file_path}: {exc}')
+
+    def _sync_file_in_background(self, file_path):
+        self.page.run_task(self._sync_file, file_path, self.nextcloud_sync_data)
+
     def load_account_balance_and_funds(self):
         # Load the previously stored funds and account balance if they exist
         self.funds = load_funds_from_json()
@@ -77,7 +86,7 @@ class SavingsFundsApp:
 
         # Sync the balance.txt file to the server as well
         if self.nextcloud_sync_data:
-            sync_data_to_nextcloud(ACCOUNT_BALANCE_FILE, self.nextcloud_sync_data)
+            self._sync_file_in_background(ACCOUNT_BALANCE_FILE)
 
     # Refresh routine for the fund cards section
     def _refresh_fund_cards(self):
@@ -141,7 +150,7 @@ class SavingsFundsApp:
 
         # Sync the funds.json file to the server as well
         if self.nextcloud_sync_data:
-            sync_data_to_nextcloud(FUNDS_FILE, self.nextcloud_sync_data)
+            self._sync_file_in_background(FUNDS_FILE)
 
     # Special handling for different screen sizes
     def _set_dashboard_width_and_padding(self):
