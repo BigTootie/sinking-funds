@@ -54,14 +54,13 @@ def sync_data_from_nextcloud(nextcloud_sync_data: dict):
         run(nextcloud_sync_command, check=True)
 
 
-def sync_data_to_nextcloud(nextcloud_sync_data: dict):
+def sync_data_to_nextcloud(data_file: Path, nextcloud_sync_data: dict):
     base_url, username, password, data_path = nextcloud_sync_data.values()
-    for data_file in [ACCOUNT_BALANCE_FILE, FUNDS_FILE]:
-        data_url = \
-            f'https://{base_url}/remote.php/dav/files/{username}/{data_path}/{data_file.name}'
-        nextcloud_sync_command = ['curl', '-u', f'{username}:{password}',
-                                  '-T', data_file.as_posix(), data_url]
-        run(nextcloud_sync_command, check=True)
+    data_url = \
+        f'https://{base_url}/remote.php/dav/files/{username}/{data_path}/{data_file.name}'
+    nextcloud_sync_command = ['curl', '-u', f'{username}:{password}',
+                              '-T', data_file.as_posix(), data_url]
+    run(nextcloud_sync_command, check=True)
 
 
 def load_nextcloud_sync_data():

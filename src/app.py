@@ -4,9 +4,11 @@ from time import sleep
 import flet as ft
 
 import colors
-from data import (load_balance_from_txt, save_balance_to_txt,
+from data import (ACCOUNT_BALANCE_FILE, FUNDS_FILE,
+                  load_balance_from_txt, save_balance_to_txt,
                   load_funds_from_json, save_funds_to_json)
-from nextcloud import (NEXTCLOUD_DATA_FILE, load_nextcloud_sync_data, sync_data_from_nextcloud)
+from nextcloud import (NEXTCLOUD_DATA_FILE, load_nextcloud_sync_data, sync_data_from_nextcloud,
+                       sync_data_to_nextcloud)
 from ui_components import (PageHeader, SavingsSummary, FundCard,
                            prompt_for_nextcloud_sync, prompt_for_account_balance,
                            open_modify_account_balance, open_add_fund_dialogue,
@@ -49,9 +51,9 @@ class SavingsFundsApp:
             await self.sync_dialog_closed.wait()
 
         # Load the nextcloud sync data
-        nextcloud_sync_data = load_nextcloud_sync_data()
-        if nextcloud_sync_data:
-            sync_data_from_nextcloud(nextcloud_sync_data)
+        self.nextcloud_sync_data = load_nextcloud_sync_data()
+        if self.nextcloud_sync_data:
+            sync_data_from_nextcloud(self.nextcloud_sync_data)
 
     def load_account_balance_and_funds(self):
         # Load the previously stored funds and account balance if they exist
@@ -72,6 +74,10 @@ class SavingsFundsApp:
 
         # Save off the new account balance anytime it is updated
         save_balance_to_txt(self.account_balance)
+
+        # Sync the balance.txt file to the server as well
+        if self.nextcloud_sync_data:
+            sync_data_to_nextcloud(ACCOUNT_BALANCE_FILE, self.nextcloud_sync_data)
 
     # Refresh routine for the fund cards section
     def _refresh_fund_cards(self):
@@ -132,6 +138,10 @@ class SavingsFundsApp:
 
         # Save the current Fund objects each time the page is refreshed
         save_funds_to_json(self.funds)
+
+        # Sync the funds.json file to the server as well
+        if self.nextcloud_sync_data:
+            sync_data_to_nextcloud(FUNDS_FILE, self.nextcloud_sync_data)
 
     # Special handling for different screen sizes
     def _set_dashboard_width_and_padding(self):
