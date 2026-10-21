@@ -1,30 +1,33 @@
-import os
 import json
+from pathlib import Path
 from datetime import datetime
 
 from fund import Fund
 
+ACCOUNT_BALANCE_FILE = Path(__file__).parent.parent / 'balance.txt'
+FUNDS_FILE = Path(__file__).parent.parent / 'funds.json'
 
-def load_balance_from_txt(txt_file: str):
-    if not os.path.exists(txt_file):
+
+def load_balance_from_txt():
+    if not ACCOUNT_BALANCE_FILE.exists():
         return -1.0
 
-    with open(txt_file, 'r') as f:
+    with open(ACCOUNT_BALANCE_FILE, 'r') as f:
         return float(f.read())
 
 
-def save_balance_to_txt(account_balance: float, txt_file: str):
-    with open(txt_file, 'w') as f:
+def save_balance_to_txt(account_balance: float):
+    with open(ACCOUNT_BALANCE_FILE, 'w') as f:
         f.write(str(account_balance))
 
 
-def load_funds_from_json(json_file: str):
-    if not os.path.exists(json_file):
-        with open(json_file, 'a') as f:
+def load_funds_from_json():
+    if not FUNDS_FILE.exists():
+        with open(FUNDS_FILE, 'a') as f:
             pass
         return []
 
-    with open(json_file, 'r') as f:
+    with open(FUNDS_FILE, 'r') as f:
         try:
             funds = []
             for item in json.load(f):
@@ -40,9 +43,9 @@ def load_funds_from_json(json_file: str):
     return funds
 
 
-def save_funds_to_json(funds: Fund, json_file: str):
+def save_funds_to_json(funds: Fund):
     funds_as_dict = [{'name': fund.name, 'target': fund.target, 'balance': fund.balance,
                       'target_date': fund.target_date_as_str(),
                       'recurring_transfer': fund.recurring_transfer} for fund in funds]
-    with open(json_file, 'w') as f:
+    with open(FUNDS_FILE, 'w') as f:
         json.dump(funds_as_dict, f, indent=4)

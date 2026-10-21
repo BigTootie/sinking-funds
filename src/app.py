@@ -1,16 +1,16 @@
-from pathlib import Path
+import asyncio
+from time import sleep
 
 import flet as ft
 
 import colors
 from data import (load_balance_from_txt, save_balance_to_txt,
                   load_funds_from_json, save_funds_to_json)
+from nextcloud import (NEXTCLOUD_DATA_FILE, load_nextcloud_sync_data, sync_data_from_nextcloud)
 from ui_components import (PageHeader, SavingsSummary, FundCard,
-                           prompt_for_account_balance, open_modify_account_balance,
-                           open_add_fund_dialogue, open_modify_fund_dialogue)
-
-ACCOUNT_BALANCE_FILE = Path(__file__).parent.parent / 'balance.txt'
-FUNDS_FILE = Path(__file__).parent.parent / 'funds.json'
+                           prompt_for_nextcloud_sync, prompt_for_account_balance,
+                           open_modify_account_balance, open_add_fund_dialogue,
+                           open_modify_fund_dialogue)
 
 
 class SavingsFundsApp:
@@ -21,18 +21,6 @@ class SavingsFundsApp:
         # Initialize the page
         self.page = page
         self._initialize_page()
-
-        # Load the previously stored funds
-        self.funds = load_funds_from_json(str(FUNDS_FILE))
-
-        # Prompt the user to input their total account balance if we don't already have one
-        self.account_balance = load_balance_from_txt(ACCOUNT_BALANCE_FILE)
-        if self.account_balance < 0:
-            prompt_for_account_balance(self.set_account_balance, self.page,
-                                       self.initialize_dashboard)
-        # Otherwise, go ahead and initialize the dashboard
-        else:
-            self.initialize_dashboard()
 
     # Initialization for the entire page
     def _initialize_page(self):
@@ -51,12 +39,39 @@ class SavingsFundsApp:
         self.page.add(ft.SafeArea(content=PageHeader, avoid_intrusions_bottom=False,
                                   avoid_intrusions_left=False, avoid_intrusions_right=False))
 
+    async def perform_nextcloud_sync(self):
+        # If we don't have nextcloud sync data stored, prompt the user for it
+        if not NEXTCLOUD_DATA_FILE.exists():
+            self.sync_dialog_closed = asyncio.Event()
+            prompt_for_nextcloud_sync(self.page, self.sync_dialog_closed)
+
+            # Wait until the user closes the nextcloud dialogue before continuing
+            await self.sync_dialog_closed.wait()
+
+        # Load the nextcloud sync data
+        nextcloud_sync_data = load_nextcloud_sync_data()
+        if nextcloud_sync_data:
+            sync_data_from_nextcloud(nextcloud_sync_data)
+
+    def load_account_balance_and_funds(self):
+        # Load the previously stored funds and account balance if they exist
+        self.funds = load_funds_from_json()
+        self.account_balance = load_balance_from_txt()
+
+        # Prompt the user to input their total account balance if we don't already have one
+        if self.account_balance < 0:
+            prompt_for_account_balance(self.set_account_balance, self.page,
+                                       self.initialize_dashboard)
+        # Otherwise, go ahead and initialize the dashboard
+        else:
+            self.initialize_dashboard()
+
     # Setter for account balance
     def set_account_balance(self, value):
         self.account_balance = value
 
         # Save off the new account balance anytime it is updated
-        save_balance_to_txt(self.account_balance, ACCOUNT_BALANCE_FILE)
+        save_balance_to_txt(self.account_balance)
 
     # Refresh routine for the fund cards section
     def _refresh_fund_cards(self):
@@ -116,7 +131,7 @@ class SavingsFundsApp:
         self.page.update()
 
         # Save the current Fund objects each time the page is refreshed
-        save_funds_to_json(self.funds, str(FUNDS_FILE))
+        save_funds_to_json(self.funds)
 
     # Special handling for different screen sizes
     def _set_dashboard_width_and_padding(self):

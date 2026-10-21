@@ -1,11 +1,12 @@
+import asyncio
 from datetime import datetime
-from copy import deepcopy
 
 import flet as ft
 
 import colors
 from utils import money_format
 from fund import Fund
+from nextcloud import ping_nextcloud_server, save_nextcloud_sync_data
 
 
 # Define the static page header
@@ -29,6 +30,50 @@ PageHeader = ft.Container(
     ),
     padding=20,
     border=ft.Border.only(bottom=ft.BorderSide(1, colors.BORDER)))
+
+
+# Define the base nextcloud sync data input dialogue
+url_input = ft.TextField(label='URL', value='', keyboard_type=ft.KeyboardType.NUMBER)
+username_input = ft.TextField(label='Username', value='', keyboard_type=ft.KeyboardType.NUMBER)
+password_input = ft.TextField(label='Password', value='', keyboard_type=ft.KeyboardType.NUMBER)
+data_path_input = ft.TextField(label='Data path', value='', keyboard_type=ft.KeyboardType.NUMBER)
+nextcloud_error = ft.Text(color=colors.RED)
+NextcloudDataInputDialogue = \
+    ft.AlertDialog(title='Enter nextcloud server info (optional)',
+                   content=ft.Column([url_input, username_input, password_input, data_path_input,
+                                      nextcloud_error], tight=True),
+                   modal=True)
+
+
+# Initial prompt when nextcloud sync data has not yet been provided
+def prompt_for_nextcloud_sync(page: ft.Page, dialog_closed: asyncio.Event):
+
+    def save_empty_nextcloud_data(e):
+        save_nextcloud_sync_data({})
+        page.pop_dialog()
+        dialog_closed.set()
+
+    async def save_nextcloud_data(e):
+        nextcloud_error.value = ''
+        page.update()
+
+        nextcloud_sync_data = {'base_url': url_input.value, 'username': username_input.value,
+                               'password': password_input.value, 'data_path': data_path_input.value}
+
+        success, error_message = await asyncio.to_thread(ping_nextcloud_server, nextcloud_sync_data)
+        if not success:
+            nextcloud_error.value = error_message
+            page.update()
+            return
+
+        save_nextcloud_sync_data(nextcloud_sync_data)
+        page.pop_dialog()
+        dialog_closed.set()
+
+    NextcloudDataInputDialogue.actions = \
+        [ft.TextButton('Skip', on_click=save_empty_nextcloud_data),
+         ft.FilledButton('Done', on_click=save_nextcloud_data)]
+    page.show_dialog(NextcloudDataInputDialogue)
 
 
 # Define the base account balance input dialogue
