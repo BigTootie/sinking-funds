@@ -33,10 +33,10 @@ PageHeader = ft.Container(
 
 
 # Define the base nextcloud sync data input dialogue
-url_input = ft.TextField(label='URL', value='', keyboard_type=ft.KeyboardType.NUMBER)
-username_input = ft.TextField(label='Username', value='', keyboard_type=ft.KeyboardType.NUMBER)
-password_input = ft.TextField(label='Password', value='', keyboard_type=ft.KeyboardType.NUMBER)
-data_path_input = ft.TextField(label='Data path', value='', keyboard_type=ft.KeyboardType.NUMBER)
+url_input = ft.TextField(label='URL')
+username_input = ft.TextField(label='Username')
+password_input = ft.TextField(label='Password')
+data_path_input = ft.TextField(label='Data path')
 nextcloud_error = ft.Text(color=colors.RED)
 NextcloudDataInputDialogue = \
     ft.AlertDialog(title='Enter nextcloud server info (optional)',
