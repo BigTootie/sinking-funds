@@ -66,15 +66,11 @@ def sync_data_from_nextcloud(nextcloud_sync_data: dict):
         data_file.write_bytes(response.content)
 
 
-def sync_data_to_nextcloud(
-    data_file: Path,
-    nextcloud_sync_data: dict,
-):
+def sync_data_to_nextcloud(data_file: Path, nextcloud_sync_data: dict):
     with data_file.open('rb') as file:
         response = requests.put(_get_file_url(nextcloud_sync_data, data_file.name),
                                 auth=_get_auth(nextcloud_sync_data), data=file,
                                 timeout=REQUEST_TIMEOUT)
-
     response.raise_for_status()
 
 
