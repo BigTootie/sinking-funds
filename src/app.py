@@ -10,9 +10,9 @@ from data import (ACCOUNT_BALANCE_FILE, FUNDS_FILE,
 from nextcloud import (NEXTCLOUD_DATA_FILE, load_nextcloud_sync_data, sync_data_from_nextcloud,
                        sync_data_to_nextcloud)
 from ui_components import (PageHeader, SavingsSummary, FundCard,
-                           prompt_for_nextcloud_sync, prompt_for_account_balance,
-                           open_modify_account_balance, open_add_fund_dialogue,
-                           open_modify_fund_dialogue)
+                           prompt_for_nextcloud_sync, show_loading_dialog,
+                           prompt_for_account_balance, open_modify_account_balance,
+                           open_add_fund_dialogue, open_modify_fund_dialogue)
 
 
 class SavingsFundsApp:
@@ -53,7 +53,14 @@ class SavingsFundsApp:
         # Load the nextcloud sync data
         self.nextcloud_sync_data = load_nextcloud_sync_data()
         if self.nextcloud_sync_data:
-            sync_data_from_nextcloud(self.nextcloud_sync_data)
+            show_loading_dialog(self.page, 'Syncing with Nextcloud...')
+            try:
+                # Run the blocking sync in a background thread
+                await asyncio.to_thread(sync_data_from_nextcloud, self.nextcloud_sync_data)
+            finally:
+                # Always close the loading dialog, even if sync fails
+                self.page.pop_dialog()
+
 
     async def _sync_file(self, file_path, sync_data):
         try:

@@ -35,7 +35,7 @@ PageHeader = ft.Container(
 # Define the base nextcloud sync data input dialogue
 url_input = ft.TextField(label='URL')
 username_input = ft.TextField(label='Username')
-password_input = ft.TextField(label='Password')
+password_input = ft.TextField(label='Password', password=True, can_reveal_password=True)
 data_path_input = ft.TextField(label='Data path')
 nextcloud_error = ft.Text(color=colors.RED)
 NextcloudDataInputDialogue = \
@@ -74,6 +74,18 @@ def prompt_for_nextcloud_sync(page: ft.Page, dialog_closed: asyncio.Event):
         [ft.TextButton('Skip', on_click=save_empty_nextcloud_data),
          ft.FilledButton('Done', on_click=save_nextcloud_data)]
     page.show_dialog(NextcloudDataInputDialogue)
+
+
+# Loading dialogue
+def show_loading_dialog(page: ft.Page, message: str):
+    LoadingDialogue = ft.AlertDialog(
+        modal=True,
+        content=ft.Row(
+            controls=[ft.ProgressRing(width=24, height=24, stroke_width=3), ft.Text(message)],
+            alignment=ft.MainAxisAlignment.CENTER, vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=20),
+    )
+    page.show_dialog(LoadingDialogue)
 
 
 # Define the base account balance input dialogue
