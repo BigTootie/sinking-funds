@@ -1,14 +1,23 @@
-"""
-Module containing the Fund class implementation
-"""
+"""Savings fund model and target progress calculations."""
+
 from datetime import datetime
+
 from dateutil import relativedelta
 
 from utils import money_format
 
+
 class Fund:
-    def __init__(self, name: str, target: float, initial_balance: float = 0.0,
-                 target_date: datetime = None, recurring_transfer: float = 0.0):
+    """A savings goal and the balance currently assigned to it."""
+
+    def __init__(
+        self,
+        name: str,
+        target: float,
+        initial_balance: float = 0.0,
+        target_date: datetime | None = None,
+        recurring_transfer: float = 0.0,
+    ):
         self.name = name
         self.target = target
         self.balance = initial_balance
@@ -17,31 +26,31 @@ class Fund:
         self.recurring_transfer = recurring_transfer
         self.on_track, self.required_recurring_transfer = self._on_track_for_target()
 
-    def add(self, amount):
-        new_balance = self.balance + amount
-        self.set_balance(new_balance)
+    def add(self, amount: float) -> None:
+        self.set_balance(self.balance + amount)
 
-    def remove(self, amount):
-        new_balance = self.balance - amount
-        self.set_balance(new_balance)
+    def remove(self, amount: float) -> None:
+        self.set_balance(self.balance - amount)
 
-    def set_target(self, value):
+    def set_target(self, value: float) -> None:
         self.target = value
         self.on_track, self.required_recurring_transfer = self._on_track_for_target()
 
-    def set_balance(self, value):
+    def set_balance(self, value: float) -> None:
         self.balance = value
         self.on_track, self.required_recurring_transfer = self._on_track_for_target()
 
-    def compute_percent_funded(self):
+    def compute_percent_funded(self) -> float:
+        if self.target <= 0:
+            return 0.0
         return round(self.balance / self.target * 100, 2)
 
-    def set_target_date(self, date):
+    def set_target_date(self, date: datetime | None) -> None:
         self.target_date = date
         self.time_remaining = self._compute_time_remaining()
         self.on_track, self.required_recurring_transfer = self._on_track_for_target()
 
-    def _compute_time_remaining(self):
+    def _compute_time_remaining(self) -> relativedelta.relativedelta | None:
         if self.target_date is None:
             return None
 
@@ -49,33 +58,34 @@ class Fund:
         return relativedelta.relativedelta(self.target_date.replace(tzinfo=None),
                                            today.replace(tzinfo=None))
 
-    def target_date_as_str(self):
+    def target_date_as_str(self) -> str:
         if self.target_date is None:
             return 'None'
-        else:
-            return self.target_date.strftime('%m/%d/%Y')
+        return self.target_date.strftime('%m/%d/%Y')
 
-    def time_remaining_as_str(self):
+    def time_remaining_as_str(self) -> str:
         if self.time_remaining is None:
             return 'N/A'
 
-        time_remaining_dict = {}
-        time_remaining_dict['years'] = self.time_remaining.years
-        time_remaining_dict['months'] = self.time_remaining.months
-        time_remaining_dict['days'] = self.time_remaining.days
-        time_remaining_str = ', '.join([f'{unit_value} {unit_lable}' \
-            for unit_lable, unit_value in time_remaining_dict.items() if unit_value != 0])
+        time_units = (
+            ('years', self.time_remaining.years),
+            ('months', self.time_remaining.months),
+            ('days', self.time_remaining.days),
+        )
+        time_remaining_str = ', '.join(
+            f'{value} {label}' for label, value in time_units if value != 0
+        )
 
         if time_remaining_str:
             return time_remaining_str + ' remaining'
         else:
             return 'No time remaining'
 
-    def set_recurring_transfer(self, recurring_transfer):
+    def set_recurring_transfer(self, recurring_transfer: float) -> None:
         self.recurring_transfer = recurring_transfer
         self.on_track, self.required_recurring_transfer = self._on_track_for_target()
 
-    def _on_track_for_target(self):
+    def _on_track_for_target(self) -> tuple[bool | None, float | None]:
         if self.time_remaining is None:
             return None, None
 
@@ -97,7 +107,7 @@ class Fund:
             on_track = self.recurring_transfer >= required_recurring_transfer
             return on_track, required_recurring_transfer
 
-    def get_on_track_status_as_str(self):
+    def get_on_track_status_as_str(self) -> str:
         match self.on_track:
             case None:
                 return 'N/A'

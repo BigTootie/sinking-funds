@@ -1,130 +1,166 @@
-from pathlib import Path
+import asyncio
 
 import flet as ft
 
 import colors
-from data import (load_balance_from_txt, save_balance_to_txt,
-                  load_funds_from_json, save_funds_to_json)
-from ui_components import (PageHeader, SavingsSummary, FundCard,
-                           prompt_for_account_balance, open_modify_account_balance,
-                           open_add_fund_dialogue, open_modify_fund_dialogue)
-
-ACCOUNT_BALANCE_FILE = Path(__file__).parent.parent / 'balance.txt'
-FUNDS_FILE = Path(__file__).parent.parent / 'funds.json'
+from budget import sync_recurring_fund_expenses
+from data import (ACCOUNT_BALANCE_FILE, BUDGET_FILE, FUNDS_FILE, load_balance_from_txt,
+                  load_funds_from_json, load_budget_categories_from_json,
+                  save_balance_to_txt, save_funds_to_json,
+                  save_budget_categories_to_json)
+from nextcloud import (NEXTCLOUD_DATA_FILE, load_nextcloud_sync_data,
+                       sync_data_from_nextcloud, sync_data_to_nextcloud)
+from ui.budget import BudgetDashboard
+from ui.navigation import AppPageNavigation
+from ui.savings import Dashboard
+from ui.settings import AppHeader, NextcloudConfigDialog, SettingsView
+from ui.shared import AccountBalanceDialog, LoadingDialog
 
 
 class SavingsFundsApp:
-    """
-    This class handles high-level setup and state management of the saving funds app
-    """
+    """Application state, persistence, synchronization, and UI composition."""
+
     def __init__(self, page: ft.Page):
-        # Initialize the page
         self.page = page
+        self.nextcloud_sync_data = None
+        self.funds = []
+        self.budget_categories = []
+        self.account_balance = -1.0
+        self.dashboard = None
+        self.budget_dashboard = None
+        self.navigation = None
         self._initialize_page()
 
-        # Load the previously stored funds
-        self.funds = load_funds_from_json(str(FUNDS_FILE))
-
-        # Prompt the user to input their total account balance if we don't already have one
-        self.account_balance = load_balance_from_txt(ACCOUNT_BALANCE_FILE)
-        if self.account_balance < 0:
-            prompt_for_account_balance(self.set_account_balance, self.page,
-                                       self.initialize_dashboard)
-        # Otherwise, go ahead and initialize the dashboard
-        else:
-            self.initialize_dashboard()
-
-    # Initialization for the entire page
     def _initialize_page(self):
-        # Set page title and color scheme
         self.page.title = 'Savings Funds'
         self.page.theme_mode = ft.ThemeMode.DARK
         self.page.bgcolor = colors.BACKGROUND
-        self.page.theme = \
-            ft.Theme(color_scheme=ft.ColorScheme(primary=colors.BLUE, surface=colors.SURFACE))
-        self.page.scroll = ft.ScrollMode.AUTO
+        self.page.theme = ft.Theme(
+            color_scheme=ft.ColorScheme(primary=colors.BLUE, surface=colors.SURFACE)
+        )
+        self.page.scroll = None
+        self.page.on_resized = lambda e: self._resize_dashboard()
 
-        # Adjust sizes of items when the page is resized
-        self.page.on_resized = lambda e: self._set_dashboard_width_and_padding()
+        self.nextcloud_dialog = NextcloudConfigDialog(self.page, self._on_nextcloud_config_saved)
+        self.header = AppHeader(self.show_settings)
+        self.settings_view = SettingsView(
+            self.page, self.show_dashboard, self.nextcloud_dialog
+        )
 
-        # Add the header
-        self.page.add(ft.SafeArea(content=PageHeader, avoid_intrusions_bottom=False,
-                                  avoid_intrusions_left=False, avoid_intrusions_right=False))
+        self.page.add(
+            ft.SafeArea(
+                content=self.header.control,
+                avoid_intrusions_bottom=False,
+                avoid_intrusions_left=False,
+                avoid_intrusions_right=False,
+            ),
+            self.settings_view.control,
+        )
 
-    # Setter for account balance
+    async def perform_nextcloud_sync(self):
+        if not NEXTCLOUD_DATA_FILE.exists():
+            self.sync_dialog_closed = asyncio.Event()
+            self.nextcloud_dialog.add(self.sync_dialog_closed)
+            await self.sync_dialog_closed.wait()
+
+        self.nextcloud_sync_data = load_nextcloud_sync_data()
+        if self.nextcloud_sync_data:
+            loading_dialog = LoadingDialog(self.page, 'Syncing with Nextcloud...')
+            loading_dialog.open()
+            try:
+                await asyncio.to_thread(sync_data_from_nextcloud, self.nextcloud_sync_data)
+            finally:
+                self.page.pop_dialog()
+
+    async def _sync_file(self, file_path, sync_data):
+        try:
+            await asyncio.to_thread(sync_data_to_nextcloud, file_path, sync_data)
+        except Exception as exc:
+            print(f'Nextcloud sync failed for {file_path}: {exc}')
+
+    def _sync_file_in_background(self, file_path):
+        self.page.run_task(self._sync_file, file_path, self.nextcloud_sync_data)
+
+    def show_settings(self):
+        if self.navigation is not None:
+            self.navigation.set_visible(False)
+        self.settings_view.show()
+
+    def show_dashboard(self):
+        self.settings_view.hide()
+        if self.navigation is not None:
+            self.navigation.set_visible(True)
+        self.page.update()
+
+    def _on_nextcloud_config_saved(self, sync_data):
+        self.nextcloud_sync_data = sync_data
+        if hasattr(self, 'settings_view'):
+            self.settings_view.control.visible = True
+        self.page.update()
+
+    def load_account_balance_and_funds(self):
+        self.funds = load_funds_from_json()
+        self.budget_categories = load_budget_categories_from_json()
+        if sync_recurring_fund_expenses(self.budget_categories, self.funds):
+            self._on_budget_categories_changed()
+        self.account_balance = load_balance_from_txt()
+
+        if self.account_balance < 0:
+            dialog = AccountBalanceDialog(self.page, self.set_account_balance)
+            dialog.add(self.initialize_dashboard)
+        else:
+            self.initialize_dashboard()
+
     def set_account_balance(self, value):
         self.account_balance = value
+        save_balance_to_txt(self.account_balance)
+        if self.nextcloud_sync_data:
+            self._sync_file_in_background(ACCOUNT_BALANCE_FILE)
 
-        # Save off the new account balance anytime it is updated
-        save_balance_to_txt(self.account_balance, ACCOUNT_BALANCE_FILE)
-
-    # Refresh routine for the fund cards section
-    def _refresh_fund_cards(self):
-        # Regenerate a FundCard for each Fund object
-        self.fund_cards = [FundCard(fund) for fund in self.funds]
-        # Set the action to open the fund modifier dialogue when a fund card is clicked on
-        for fund_card in self.fund_cards:
-            fund_card.control.on_click = lambda e, fund=fund_card.fund: \
-                open_modify_fund_dialogue(self.page, self.funds, fund, self.refresh_page)
-
-        # Update the content of the fund cards column
-        self.fund_cards_column.controls = [fund_card.control for fund_card in self.fund_cards]
-
-    # Initialization for the dashboard section
     def initialize_dashboard(self):
-        # Initialize the savings summary section
-        self.summary = SavingsSummary()
-        self.summary.refresh(self.account_balance, sum(fund.balance for fund in self.funds))
-        self.summary.control.on_click = lambda e: \
-            open_modify_account_balance(self.set_account_balance, self.page, self.refresh_page)
+        self.dashboard = Dashboard(
+            self.page,
+            self.funds,
+            lambda: self.account_balance,
+            self.set_account_balance,
+            self._on_funds_changed,
+        )
+        self.budget_dashboard = BudgetDashboard(
+            self.page,
+            self.budget_categories,
+            self._on_budget_categories_changed,
+        )
+        self.navigation = AppPageNavigation(
+            self.page, [self.dashboard.control, self.budget_dashboard.control]
+        )
+        self.page.add(self.navigation.page_view)
+        self.page.update()
 
-        # Create the "Add fund" button
-        action_buttons = \
-            ft.Row([ft.OutlinedButton('Add fund', icon=ft.Icons.ADD_CIRCLE_OUTLINE, expand=True,
-                                      on_click=lambda e: open_add_fund_dialogue(self.page,
-                                                                                self.funds,
-                                                                                self.refresh_page))
-                   ], spacing=12)
-
-        # Define a function to handle fund card reordering
-        def reorder_funds(e):
-            self.funds.insert(e.new_index, self.funds.pop(e.old_index))
-            self.refresh_page()
-
-        # Initialize the fund cards section
-        self.fund_cards_column = ft.ReorderableListView(expand=True, spacing=12,
-                                                        on_reorder=reorder_funds)
-        self._refresh_fund_cards()
-
-        # Create the dashboard Container object
-        self.dashboard = \
-            ft.Container(content=ft.Column([self.summary.control,
-                                            action_buttons,
-                                            self.fund_cards_column],
-                                           spacing=18,
-                                           horizontal_alignment=ft.CrossAxisAlignment.STRETCH))
-        self._set_dashboard_width_and_padding()
-
-        # Add the dashboard to the page
-        self.page.add(ft.Row([self.dashboard], alignment=ft.MainAxisAlignment.CENTER,
-                             vertical_alignment=ft.CrossAxisAlignment.START, expand=True))
-
-    # Refresher for all dynamic page elements
     def refresh_page(self):
-        self.summary.refresh(self.account_balance, sum(fund.balance for fund in self.funds))
-        self._refresh_fund_cards()
+        if self.dashboard is not None:
+            self.dashboard.refresh()
         self.page.update()
 
-        # Save the current Fund objects each time the page is refreshed
-        save_funds_to_json(self.funds, str(FUNDS_FILE))
+    def _on_funds_changed(self):
+        save_funds_to_json(self.funds)
+        if sync_recurring_fund_expenses(self.budget_categories, self.funds):
+            self._on_budget_categories_changed()
+        if self.nextcloud_sync_data:
+            self._sync_file_in_background(FUNDS_FILE)
+        self.refresh_page()
 
-    # Special handling for different screen sizes
-    def _set_dashboard_width_and_padding(self):
-        screen_width = self.page.width
-        is_mobile = screen_width < 600
-        margin = 12 if is_mobile else 24
-
-        self.dashboard.width = min(760, max(screen_width - 2 * margin, 0))
-        self.dashboard.padding = margin
-
+    def _on_budget_categories_changed(self):
+        save_budget_categories_to_json(self.budget_categories)
+        if self.nextcloud_sync_data:
+            self._sync_file_in_background(BUDGET_FILE)
+        if self.budget_dashboard is not None:
+            self.budget_dashboard.refresh()
         self.page.update()
+
+    def _resize_dashboard(self):
+        if self.dashboard is not None:
+            self.dashboard.resize()
+        if self.budget_dashboard is not None:
+            self.budget_dashboard.resize()
+        if self.dashboard is not None or self.budget_dashboard is not None:
+            self.page.update()
