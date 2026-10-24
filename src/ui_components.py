@@ -6,7 +6,7 @@ import flet as ft
 import colors
 from utils import money_format
 from fund import Fund
-from nextcloud import ping_nextcloud_server, save_nextcloud_sync_data
+from nextcloud import ping_nextcloud_server, save_nextcloud_sync_data, load_nextcloud_sync_data
 
 
 # Define the static page header
@@ -73,6 +73,49 @@ def prompt_for_nextcloud_sync(page: ft.Page, dialog_closed: asyncio.Event):
     NextcloudDataInputDialogue.actions = \
         [ft.TextButton('Skip', on_click=save_empty_nextcloud_data),
          ft.FilledButton('Done', on_click=save_nextcloud_data)]
+    page.show_dialog(NextcloudDataInputDialogue)
+
+
+def open_modify_nextcloud_config(page: ft.Page, on_saved):
+    # Load the current configuration into the input fields
+    sync_data = load_nextcloud_sync_data() or {}
+
+    url_input.value = sync_data.get('base_url', '')
+    username_input.value = sync_data.get('username', '')
+    password_input.value = sync_data.get('password', '')
+    data_path_input.value = sync_data.get('data_path', '')
+    nextcloud_error.value = ''
+
+    async def save_nextcloud_data(e):
+        nextcloud_error.value = ''
+        page.update()
+
+        new_sync_data = {
+            'base_url': (url_input.value or '').strip(),
+            'username': (username_input.value or '').strip(),
+            'password': password_input.value or '',
+            'data_path': (data_path_input.value or '').strip(),
+        }
+
+        success, error_message = await asyncio.to_thread(
+            ping_nextcloud_server, new_sync_data
+        )
+
+        if not success:
+            nextcloud_error.value = error_message
+            page.update()
+            return
+
+        save_nextcloud_sync_data(new_sync_data)
+        page.pop_dialog()
+        on_saved(new_sync_data)
+
+    NextcloudDataInputDialogue.title = 'Modify Nextcloud config'
+    NextcloudDataInputDialogue.actions = [
+        ft.TextButton('Cancel', on_click=lambda e: page.pop_dialog()),
+        ft.FilledButton('Save', on_click=save_nextcloud_data),
+    ]
+
     page.show_dialog(NextcloudDataInputDialogue)
 
 

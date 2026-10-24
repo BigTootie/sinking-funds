@@ -11,6 +11,7 @@ from nextcloud import (NEXTCLOUD_DATA_FILE, load_nextcloud_sync_data, sync_data_
                        sync_data_to_nextcloud)
 from ui_components import (PageHeader, SavingsSummary, FundCard,
                            prompt_for_nextcloud_sync, show_loading_dialog,
+                           open_modify_nextcloud_config,
                            prompt_for_account_balance, open_modify_account_balance,
                            open_add_fund_dialogue, open_modify_fund_dialogue)
 
@@ -22,24 +23,112 @@ class SavingsFundsApp:
     def __init__(self, page: ft.Page):
         # Initialize the page
         self.page = page
+        self.nextcloud_sync_data = None
         self._initialize_page()
 
-    # Initialization for the entire page
     def _initialize_page(self):
-        # Set page title and color scheme
         self.page.title = 'Savings Funds'
         self.page.theme_mode = ft.ThemeMode.DARK
         self.page.bgcolor = colors.BACKGROUND
-        self.page.theme = \
-            ft.Theme(color_scheme=ft.ColorScheme(primary=colors.BLUE, surface=colors.SURFACE))
+        self.page.theme = ft.Theme(
+            color_scheme=ft.ColorScheme(
+                primary=colors.BLUE,
+                surface=colors.SURFACE,
+            )
+        )
         self.page.scroll = ft.ScrollMode.AUTO
-
-        # Adjust sizes of items when the page is resized
         self.page.on_resized = lambda e: self._set_dashboard_width_and_padding()
 
-        # Add the header
-        self.page.add(ft.SafeArea(content=PageHeader, avoid_intrusions_bottom=False,
-                                  avoid_intrusions_left=False, avoid_intrusions_right=False))
+        # Connect the settings icon
+        PageHeader.content.controls[2].on_click = (
+            lambda e: self.show_settings()
+        )
+
+        self.page.add(
+            ft.SafeArea(
+                content=PageHeader,
+                avoid_intrusions_bottom=False,
+                avoid_intrusions_left=False,
+                avoid_intrusions_right=False,
+            )
+        )
+
+        # Settings page
+        self.settings_page = ft.Container(
+            visible=False,
+            padding=24,
+            content=ft.Column(
+                controls=[
+                    ft.Row(
+                        controls=[
+                            ft.IconButton(
+                                icon=ft.Icons.ARROW_BACK,
+                                tooltip='Back to dashboard',
+                                on_click=lambda e: self.show_dashboard(),
+                            ),
+                            ft.Text(
+                                'Settings',
+                                size=24,
+                                weight=ft.FontWeight.BOLD,
+                                expand=True,
+                            ),
+                        ],
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    ft.Container(height=8),
+                    ft.Container(
+                        content=ft.Row(
+                            controls=[
+                                ft.Container(
+                                    content=ft.Icon(
+                                        ft.Icons.CLOUD_OUTLINED,
+                                        size=24,
+                                        color=colors.BLUE,
+                                    ),
+                                    bgcolor=colors.SURFACE,
+                                    border_radius=10,
+                                    padding=12,
+                                ),
+                                ft.Column(
+                                    controls=[
+                                        ft.Text(
+                                            'Nextcloud Sync',
+                                            size=15,
+                                            weight=ft.FontWeight.W_600,
+                                        ),
+                                        ft.Text(
+                                            'Configure server connection and sync settings',
+                                            size=12,
+                                            color=colors.TEXT_SECONDARY,
+                                        ),
+                                    ],
+                                    spacing=4,
+                                    expand=True,
+                                ),
+                                ft.Icon(
+                                    ft.Icons.CHEVRON_RIGHT,
+                                    color=colors.TEXT_SECONDARY,
+                                ),
+                            ],
+                            spacing=14,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        ),
+                        padding=16,
+                        border=ft.Border.all(1, colors.BORDER),
+                        border_radius=14,
+                        ink=True,
+                        on_click=lambda e: open_modify_nextcloud_config(
+                            self.page,
+                            self._on_nextcloud_config_saved,
+                        ),
+                    ),
+                ],
+                spacing=16,
+                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            ),
+        )
+
+        self.page.add(self.settings_page)
 
     async def perform_nextcloud_sync(self):
         # If we don't have nextcloud sync data stored, prompt the user for it
@@ -61,7 +150,6 @@ class SavingsFundsApp:
                 # Always close the loading dialog, even if sync fails
                 self.page.pop_dialog()
 
-
     async def _sync_file(self, file_path, sync_data):
         try:
             await asyncio.to_thread(sync_data_to_nextcloud, file_path, sync_data)
@@ -70,6 +158,27 @@ class SavingsFundsApp:
 
     def _sync_file_in_background(self, file_path):
         self.page.run_task(self._sync_file, file_path, self.nextcloud_sync_data)
+
+
+    def show_settings(self):
+        self.dashboard_row.visible = False
+        self.settings_page.visible = True
+        self.page.update()
+
+
+    def show_dashboard(self):
+        self.settings_page.visible = False
+        self.dashboard_row.visible = True
+        self.page.update()
+
+
+    def _on_nextcloud_config_saved(self, sync_data):
+        # Update the active configuration immediately
+        self.nextcloud_sync_data = sync_data
+
+        # Return to the settings page after saving
+        self.settings_page.visible = True
+        self.page.update()
 
     def load_account_balance_and_funds(self):
         # Load the previously stored funds and account balance if they exist
@@ -143,8 +252,14 @@ class SavingsFundsApp:
         self._set_dashboard_width_and_padding()
 
         # Add the dashboard to the page
-        self.page.add(ft.Row([self.dashboard], alignment=ft.MainAxisAlignment.CENTER,
-                             vertical_alignment=ft.CrossAxisAlignment.START, expand=True))
+        self.dashboard_row = ft.Row(
+            [self.dashboard],
+            alignment=ft.MainAxisAlignment.CENTER,
+            vertical_alignment=ft.CrossAxisAlignment.START,
+            expand=True,
+        )
+
+        self.page.add(self.dashboard_row)
 
     # Refresher for all dynamic page elements
     def refresh_page(self):
