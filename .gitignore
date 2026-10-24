@@ -163,3 +163,4 @@ cython_debug/
 nextcloud_sync.json
 balance.txt
 funds.json
+budget.json

@@ -25,12 +25,14 @@ async def flet_app(tmp_path, monkeypatch, request):
 
     balance_path = tmp_path / 'balance.txt'
     funds_path = tmp_path / 'funds.json'
+    budget_path = tmp_path / 'budget.json'
     config_path = tmp_path / 'nextcloud_sync.json'
 
     # These tests exercise the shipped UI and app callbacks while keeping all
     # persistence inside pytest's temporary directory.
     monkeypatch.setattr(data, 'ACCOUNT_BALANCE_FILE', balance_path)
     monkeypatch.setattr(data, 'FUNDS_FILE', funds_path)
+    monkeypatch.setattr(data, 'BUDGET_FILE', budget_path)
     monkeypatch.setattr(nextcloud, 'ACCOUNT_BALANCE_FILE', balance_path)
     monkeypatch.setattr(nextcloud, 'FUNDS_FILE', funds_path)
     monkeypatch.setattr(nextcloud, 'NEXTCLOUD_DATA_FILE', config_path)
@@ -46,6 +48,7 @@ async def flet_app(tmp_path, monkeypatch, request):
         funds_path.write_text(
             json.dumps(seed_funds.args[0] if seed_funds else []), encoding='utf-8'
         )
+        budget_path.write_text('[]', encoding='utf-8')
 
     flutter_app_dir = os.environ.get('FLET_TEST_FLUTTER_APP_DIR')
     if not flutter_app_dir:
@@ -86,6 +89,7 @@ async def flet_app(tmp_path, monkeypatch, request):
     test_app.paths = {
         'balance': balance_path,
         'funds': funds_path,
+        'budget': budget_path,
         'nextcloud': config_path,
     }
     test_app.app_state = state

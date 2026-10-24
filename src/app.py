@@ -4,10 +4,13 @@ import flet as ft
 
 import colors
 from data import (ACCOUNT_BALANCE_FILE, FUNDS_FILE, load_balance_from_txt,
-                  load_funds_from_json, save_balance_to_txt, save_funds_to_json)
+                  load_funds_from_json, load_budget_categories_from_json,
+                  save_balance_to_txt, save_funds_to_json,
+                  save_budget_categories_to_json)
 from nextcloud import (NEXTCLOUD_DATA_FILE, load_nextcloud_sync_data,
                        sync_data_from_nextcloud, sync_data_to_nextcloud)
-from ui_components import (AccountBalanceDialog, AppHeader, Dashboard, LoadingDialog,
+from ui_components import (AccountBalanceDialog, AppHeader, AppPageNavigation,
+                           BudgetDashboard, Dashboard, LoadingDialog,
                            NextcloudConfigDialog, SettingsView)
 
 
@@ -18,8 +21,11 @@ class SavingsFundsApp:
         self.page = page
         self.nextcloud_sync_data = None
         self.funds = []
+        self.budget_categories = []
         self.account_balance = -1.0
         self.dashboard = None
+        self.budget_dashboard = None
+        self.navigation = None
         self._initialize_page()
 
     def _initialize_page(self):
@@ -73,14 +79,14 @@ class SavingsFundsApp:
         self.page.run_task(self._sync_file, file_path, self.nextcloud_sync_data)
 
     def show_settings(self):
-        if self.dashboard is not None:
-            self.dashboard.control.visible = False
+        if self.navigation is not None:
+            self.navigation.set_visible(False)
         self.settings_view.show()
 
     def show_dashboard(self):
         self.settings_view.hide()
-        if self.dashboard is not None:
-            self.dashboard.control.visible = True
+        if self.navigation is not None:
+            self.navigation.set_visible(True)
         self.page.update()
 
     def _on_nextcloud_config_saved(self, sync_data):
@@ -91,6 +97,7 @@ class SavingsFundsApp:
 
     def load_account_balance_and_funds(self):
         self.funds = load_funds_from_json()
+        self.budget_categories = load_budget_categories_from_json()
         self.account_balance = load_balance_from_txt()
 
         if self.account_balance < 0:
@@ -113,8 +120,15 @@ class SavingsFundsApp:
             self.set_account_balance,
             self._on_funds_changed,
         )
-        self.dashboard.control.visible = True
-        self.page.add(self.dashboard.control)
+        self.budget_dashboard = BudgetDashboard(
+            self.page,
+            self.budget_categories,
+            self._on_budget_categories_changed,
+        )
+        self.navigation = AppPageNavigation(
+            self.page, [self.dashboard.control, self.budget_dashboard.control]
+        )
+        self.page.add(self.navigation.page_view)
         self.page.update()
 
     def refresh_page(self):
@@ -128,7 +142,16 @@ class SavingsFundsApp:
             self._sync_file_in_background(FUNDS_FILE)
         self.refresh_page()
 
+    def _on_budget_categories_changed(self):
+        save_budget_categories_to_json(self.budget_categories)
+        if self.budget_dashboard is not None:
+            self.budget_dashboard.refresh()
+        self.page.update()
+
     def _resize_dashboard(self):
         if self.dashboard is not None:
             self.dashboard.resize()
+        if self.budget_dashboard is not None:
+            self.budget_dashboard.resize()
+        if self.dashboard is not None or self.budget_dashboard is not None:
             self.page.update()

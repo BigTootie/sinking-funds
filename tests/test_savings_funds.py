@@ -119,6 +119,48 @@ async def test_settings_can_modify_nextcloud_configuration(flet_app: ftt.FletTes
     await wait_for_key_count(tester, 'add-fund-button', 1)
 
 
+async def test_budget_page_navigation_and_category_persistence(flet_app: ftt.FletTestApp):
+    tester = flet_app.tester
+    await tester.pump_and_settle()
+
+    await tap(tester, 'nav-budget')
+    await wait_for_key_count(tester, 'add-budget-category-button', 1)
+    assert (await tester.find_by_text('MONTHLY BUDGET')).count == 1
+
+    await tap(tester, 'add-budget-category-button')
+    await enter(tester, 'budget-category-name-input', 'Groceries')
+    await enter(tester, 'budget-category-budget-input', '1200')
+    await enter(tester, 'budget-category-spent-input', '350')
+    await tap(tester, 'budget-category-save-button')
+
+    await wait_for_key_count(tester, 'budget-category-Groceries', 1)
+    assert (await tester.find_by_text('$350.00 spent of $1,200.00')).count == 1
+    saved = json.loads(flet_app.paths['budget'].read_text(encoding='utf-8'))
+    assert saved == [{'name': 'Groceries', 'budgeted': 1200, 'spent': 350}]
+
+    await tap(tester, 'budget-category-Groceries')
+    await enter(tester, 'budget-category-spent-input', '400')
+    await tap(tester, 'budget-category-save-button')
+    assert (await tester.find_by_text('$400.00 spent this month')).count == 1
+    saved = json.loads(flet_app.paths['budget'].read_text(encoding='utf-8'))
+    assert saved[0]['spent'] == 400
+
+    await tap(tester, 'budget-category-Groceries')
+    await tap(tester, 'budget-category-delete-button')
+    await wait_for_key_count(tester, 'budget-category-Groceries', 0)
+    assert json.loads(flet_app.paths['budget'].read_text(encoding='utf-8')) == []
+
+    await tap(tester, 'nav-savings')
+    await wait_for_key_count(tester, 'add-fund-button', 1)
+
+    await tester.drag(await tester.find_by_key('app-page-view'), ft.Offset(-500, 0))
+    await tester.pump_and_settle()
+    await wait_for_key_count(tester, 'add-budget-category-button', 1)
+    await tester.drag(await tester.find_by_key('app-page-view'), ft.Offset(500, 0))
+    await tester.pump_and_settle()
+    await wait_for_key_count(tester, 'add-fund-button', 1)
+
+
 @pytest.mark.seed_funds([
     {'name': 'First', 'target': 100, 'balance': 10, 'target_date': 'None', 'recurring_transfer': 0},
     {'name': 'Second', 'target': 200, 'balance': 20, 'target_date': '01/01/2027',

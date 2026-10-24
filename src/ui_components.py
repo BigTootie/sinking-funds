@@ -13,6 +13,7 @@ import flet as ft
 
 import colors
 from fund import Fund
+from budget import BudgetCategory
 from nextcloud import load_nextcloud_sync_data, ping_nextcloud_server, save_nextcloud_sync_data
 from utils import money_format
 
@@ -588,6 +589,294 @@ class Dashboard:
         margin = 12 if screen_width < 600 else 24
         self.content.width = min(760, max(screen_width - 2 * margin, 0))
         self.content.padding = margin
+
+
+class BudgetCategoryDialog:
+    """Add, edit, or remove a monthly budget category."""
+
+    def __init__(self, page: ft.Page, categories: list[BudgetCategory],
+                 on_changed: Callable[[], None]):
+        self.page = page
+        self.categories = categories
+        self.on_changed = on_changed
+
+    def add(self):
+        self._open()
+
+    def modify(self, category: BudgetCategory):
+        self._open(category)
+
+    def _open(self, category: BudgetCategory | None = None):
+        is_modify = category is not None
+        name_input = ft.TextField(
+            label='Category name', value=category.name if category else '',
+            key='budget-category-name-input',
+        )
+        budget_input = ft.TextField(
+            label='Monthly budget ($)',
+            value=str(category.budgeted) if category else '',
+            keyboard_type=ft.KeyboardType.NUMBER,
+            key='budget-category-budget-input',
+        )
+        spent_input = ft.TextField(
+            label='Spent this month ($)',
+            value=str(category.spent) if category else '0',
+            keyboard_type=ft.KeyboardType.NUMBER,
+            key='budget-category-spent-input',
+        )
+        error = ft.Text(color=colors.RED)
+
+        def save(e):
+            name = (name_input.value or '').strip()
+            if not name:
+                error.value = 'Enter a category name.'
+                self.page.update()
+                return
+
+            try:
+                budgeted = float(budget_input.value or '-1')
+                spent = float(spent_input.value or '0')
+                if budgeted < 0 or spent < 0:
+                    raise ValueError
+            except (ValueError, TypeError):
+                error.value = 'Enter valid non-negative amounts.'
+                self.page.update()
+                return
+
+            if is_modify:
+                category.name = name
+                category.budgeted = budgeted
+                category.spent = spent
+            else:
+                self.categories.insert(0, BudgetCategory(name, budgeted, spent))
+
+            self.page.pop_dialog()
+            self.on_changed()
+
+        actions = []
+        if is_modify:
+            def delete(e):
+                self.categories.remove(category)
+                self.page.pop_dialog()
+                self.on_changed()
+
+            actions.append(ft.FilledButton(
+                'Delete', key='budget-category-delete-button',
+                bgcolor=colors.RED, on_click=delete,
+            ))
+            actions.append(ft.TextButton(
+                'Cancel', key='budget-category-cancel-button',
+                on_click=lambda e: self.page.pop_dialog(),
+            ))
+        else:
+            actions.append(ft.TextButton(
+                'Cancel', key='budget-category-cancel-button',
+                on_click=lambda e: self.page.pop_dialog(),
+            ))
+        actions.append(ft.FilledButton(
+            'Save', key='budget-category-save-button', on_click=save
+        ))
+
+        self.control = ft.AlertDialog(
+            title='Edit budget category' if is_modify else 'Add budget category',
+            content=ft.Column([name_input, budget_input, spent_input, error], tight=True, width=320),
+            actions=actions,
+            modal=True,
+        )
+        self.page.show_dialog(self.control)
+
+
+class BudgetSummary:
+    """Monthly total, spent, available, and progress summary."""
+
+    def __init__(self):
+        self.total_budgeted = ft.Text(size=32, weight=ft.FontWeight.BOLD)
+        self.total_spent = ft.Text(size=13, color=colors.TEXT_SECONDARY)
+        self.remaining = ft.Text(size=12, color=colors.TEXT_SECONDARY)
+        self.progress = ft.ProgressBar(
+            value=0, color=colors.BLUE, bgcolor=colors.BORDER, height=8, border_radius=10
+        )
+        self.control = ft.Container(
+            content=ft.Column(
+                [
+                    ft.Text('MONTHLY BUDGET', size=11, weight=ft.FontWeight.BOLD),
+                    self.total_budgeted,
+                    self.total_spent,
+                    self.progress,
+                    self.remaining,
+                ],
+                spacing=12,
+            ),
+            border=ft.Border.all(1, colors.BORDER),
+            border_radius=18,
+            padding=22,
+        )
+
+    def refresh(self, categories: list[BudgetCategory]):
+        total_budgeted = sum(category.budgeted for category in categories)
+        total_spent = sum(category.spent for category in categories)
+        available = total_budgeted - total_spent
+        self.total_budgeted.value = money_format(total_budgeted)
+        self.total_spent.value = f'{money_format(total_spent)} spent this month'
+        self.remaining.value = (
+            f'{money_format(available)} remaining' if available >= 0
+            else f'{money_format(abs(available))} over budget'
+        )
+        self.remaining.color = colors.TEXT_SECONDARY if available >= 0 else colors.RED
+        self.progress.value = min(total_spent / total_budgeted, 1) if total_budgeted > 0 else 0
+
+
+class BudgetCategoryCard:
+    """Presentation and edit action for one budget category."""
+
+    def __init__(self, category: BudgetCategory, dialog: BudgetCategoryDialog):
+        self.category = category
+        self.dialog = dialog
+        self.name = ft.Text(size=15, weight=ft.FontWeight.W_600, expand=True)
+        self.amounts = ft.Text(size=12, color=colors.TEXT_SECONDARY)
+        self.remaining = ft.Text(size=13, weight=ft.FontWeight.BOLD)
+        self.progress = ft.ProgressBar(
+            height=6, border_radius=10, color=colors.BLUE, bgcolor=colors.BORDER
+        )
+        self.control = ft.Container(
+            content=ft.Column(
+                [
+                    ft.Row([self.name, self.remaining], spacing=12),
+                    self.amounts,
+                    self.progress,
+                ],
+                spacing=10,
+            ),
+            border=ft.Border.all(1, colors.BORDER),
+            border_radius=16,
+            padding=16,
+            key=f'budget-category-{category.name}',
+            on_click=self._edit,
+        )
+        self.refresh()
+
+    def _edit(self, e):
+        self.dialog.modify(self.category)
+
+    def refresh(self):
+        self.name.value = self.category.name
+        self.amounts.value = (
+            f'{money_format(self.category.spent)} spent of '
+            f'{money_format(self.category.budgeted)}'
+        )
+        if self.category.remaining >= 0:
+            self.remaining.value = f'{money_format(self.category.remaining)} left'
+            self.remaining.color = colors.GREEN
+        else:
+            self.remaining.value = f'{money_format(abs(self.category.remaining))} over'
+            self.remaining.color = colors.RED
+        self.progress.value = min(max(self.category.percent_spent, 0), 1)
+
+
+class BudgetDashboard:
+    """Responsive monthly budget page with category editing and totals."""
+
+    def __init__(self, page: ft.Page, categories: list[BudgetCategory],
+                 on_categories_changed: Callable[[], None]):
+        self.page = page
+        self.categories = categories
+        self.on_categories_changed = on_categories_changed
+        self.dialog = BudgetCategoryDialog(page, categories, self._categories_changed)
+        self.summary = BudgetSummary()
+        self.add_button = ft.OutlinedButton(
+            'Add category', icon=ft.Icons.ADD_CIRCLE_OUTLINE, expand=True,
+            key='add-budget-category-button', on_click=self._add_category,
+        )
+        self.category_list = ft.ListView(expand=True, spacing=12)
+        self.content = ft.Container(
+            content=ft.Column(
+                [
+                    self.summary.control,
+                    ft.Text(
+                        'Track monthly spending by category.',
+                        size=13,
+                        color=colors.TEXT_SECONDARY,
+                    ),
+                    ft.Row([self.add_button]),
+                    self.category_list,
+                ],
+                spacing=16,
+                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            )
+        )
+        self.control = ft.Row(
+            [self.content],
+            alignment=ft.MainAxisAlignment.CENTER,
+            vertical_alignment=ft.CrossAxisAlignment.START,
+            expand=True,
+        )
+        self.cards = []
+        self.refresh()
+        self.resize()
+
+    def _add_category(self, e):
+        self.dialog.add()
+
+    def _categories_changed(self):
+        self.on_categories_changed()
+
+    def refresh(self):
+        self.summary.refresh(self.categories)
+        self.cards = [BudgetCategoryCard(category, self.dialog) for category in self.categories]
+        self.category_list.controls = [card.control for card in self.cards]
+
+    def resize(self):
+        screen_width = self.page.width or 0
+        margin = 12 if screen_width < 600 else 24
+        self.content.width = min(760, max(screen_width - 2 * margin, 0))
+        self.content.padding = margin
+
+
+class AppPageNavigation:
+    """Keeps bottom navigation and horizontal page swipes in sync."""
+
+    def __init__(self, page: ft.Page, pages: list[ft.Control]):
+        self.page = page
+        self.page_view = ft.PageView(
+            controls=pages,
+            expand=True,
+            horizontal=True,
+            snap=True,
+            on_change=self._on_swipe,
+            key='app-page-view',
+        )
+        self.navigation_bar = ft.NavigationBar(
+            destinations=[
+                ft.NavigationBarDestination(
+                    icon=ft.Icons.SAVINGS_OUTLINED,
+                    selected_icon=ft.Icons.SAVINGS,
+                    label='Savings',
+                    key='nav-savings',
+                ),
+                ft.NavigationBarDestination(
+                    icon=ft.Icons.PIE_CHART_OUTLINE,
+                    selected_icon=ft.Icons.PIE_CHART,
+                    label='Budget',
+                    key='nav-budget',
+                ),
+            ],
+            selected_index=0,
+            bgcolor=colors.SURFACE,
+            indicator_color=colors.BLUE,
+            on_change=self._on_navigation_change,
+        )
+        self.page.navigation_bar = self.navigation_bar
+
+    async def _on_navigation_change(self, e):
+        await self.page_view.go_to_page(e.control.selected_index)
+
+    def _on_swipe(self, e):
+        self.navigation_bar.selected_index = int(e.data)
+        self.page.update()
+
+    def set_visible(self, visible: bool):
+        self.page_view.visible = visible
+        self.navigation_bar.visible = visible
 
 
 class SettingsView:

@@ -3,9 +3,11 @@ from pathlib import Path
 from datetime import datetime
 
 from fund import Fund
+from budget import BudgetCategory
 
 ACCOUNT_BALANCE_FILE = Path(__file__).parent.parent / 'balance.txt'
 FUNDS_FILE = Path(__file__).parent.parent / 'funds.json'
+BUDGET_FILE = Path(__file__).parent.parent / 'budget.json'
 
 
 def load_balance_from_txt():
@@ -49,3 +51,24 @@ def save_funds_to_json(funds: Fund):
                       'recurring_transfer': fund.recurring_transfer} for fund in funds]
     with open(FUNDS_FILE, 'w') as f:
         json.dump(funds_as_dict, f, indent=4)
+
+
+def load_budget_categories_from_json():
+    if not BUDGET_FILE.exists():
+        BUDGET_FILE.touch()
+        return []
+
+    with open(BUDGET_FILE, 'r') as f:
+        try:
+            return [BudgetCategory(**item) for item in json.load(f)]
+        except json.JSONDecodeError:
+            return []
+
+
+def save_budget_categories_to_json(categories: list[BudgetCategory]):
+    categories_as_dict = [
+        {'name': category.name, 'budgeted': category.budgeted, 'spent': category.spent}
+        for category in categories
+    ]
+    with open(BUDGET_FILE, 'w') as f:
+        json.dump(categories_as_dict, f, indent=4)
