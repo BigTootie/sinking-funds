@@ -18,6 +18,20 @@ uv run flet run --web
 
 For more details on running the app, refer to the [Getting Started Guide](https://docs.flet.dev/).
 
+## Run the tests
+
+Run the Flet UI integration tests and the offline model, persistence, and
+Nextcloud tests with:
+
+```bash
+uv run flet test
+```
+
+The UI tests use Flet's tester to interact with the app. They keep all saved
+data in pytest temporary directories and stub the Nextcloud server check. On
+Linux, the first run also needs the Flutter and GTK development prerequisites
+used by Flet to build its test host.
+
 ## Build the app
 
 ### Android

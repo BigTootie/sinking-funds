@@ -24,6 +24,7 @@ class SettingsButton:
         self.control = ft.IconButton(
             icon=ft.Icons.SETTINGS_OUTLINED,
             tooltip='Settings',
+            key='settings-button',
             icon_color=colors.TEXT_SECONDARY,
             on_click=lambda e: on_click(),
         )
@@ -93,15 +94,22 @@ class NextcloudConfigDialog:
         self._open(load_nextcloud_sync_data() or {}, 'Modify Nextcloud config')
 
     def _open(self, initial: dict, title: str, on_complete: asyncio.Event | None = None):
-        url_input = ft.TextField(label='URL', value=initial.get('base_url', ''))
-        username_input = ft.TextField(label='Username', value=initial.get('username', ''))
+        url_input = ft.TextField(
+            label='URL', value=initial.get('base_url', ''), key='nextcloud-url-input'
+        )
+        username_input = ft.TextField(
+            label='Username', value=initial.get('username', ''), key='nextcloud-username-input'
+        )
         password_input = ft.TextField(
             label='Password',
             value=initial.get('password', ''),
             password=True,
             can_reveal_password=True,
+            key='nextcloud-password-input',
         )
-        data_path_input = ft.TextField(label='Data path', value=initial.get('data_path', ''))
+        data_path_input = ft.TextField(
+            label='Data path', value=initial.get('data_path', ''), key='nextcloud-path-input'
+        )
         error = ft.Text(color=colors.RED)
 
         def skip(e):
@@ -135,10 +143,16 @@ class NextcloudConfigDialog:
 
         actions = []
         if on_complete is not None:
-            actions.append(ft.TextButton('Skip', on_click=skip))
+            actions.append(ft.TextButton('Skip', key='nextcloud-skip-button', on_click=skip))
         else:
-            actions.append(ft.TextButton('Cancel', on_click=lambda e: self.page.pop_dialog()))
-        actions.append(ft.FilledButton('Done' if on_complete is not None else 'Save', on_click=save))
+            actions.append(ft.TextButton(
+                'Cancel', key='nextcloud-cancel-button', on_click=lambda e: self.page.pop_dialog()
+            ))
+        actions.append(ft.FilledButton(
+            'Done' if on_complete is not None else 'Save',
+            key='nextcloud-save-button',
+            on_click=save,
+        ))
 
         self.control = ft.AlertDialog(
             title=title,
@@ -166,7 +180,8 @@ class AccountBalanceDialog:
     def _open(self, initial_value: float | None, title: str, on_complete: Callable[[], None]):
         value = '' if initial_value is None else str(initial_value)
         balance_input = ft.TextField(
-            label='Account balance ($)', value=value, keyboard_type=ft.KeyboardType.NUMBER
+            label='Account balance ($)', value=value, keyboard_type=ft.KeyboardType.NUMBER,
+            key='account-balance-input',
         )
         error = ft.Text(color=colors.RED)
 
@@ -186,8 +201,10 @@ class AccountBalanceDialog:
 
         actions = []
         if initial_value is not None:
-            actions.append(ft.TextButton('Cancel', on_click=lambda e: self.page.pop_dialog()))
-        actions.append(ft.FilledButton('Done', on_click=save))
+            actions.append(ft.TextButton(
+                'Cancel', key='account-balance-cancel', on_click=lambda e: self.page.pop_dialog()
+            ))
+        actions.append(ft.FilledButton('Done', key='account-balance-save', on_click=save))
 
         self.control = ft.AlertDialog(
             title=title,
@@ -214,19 +231,21 @@ class FundDialog:
 
     def _open(self, fund: Fund | None = None):
         modifying = fund is not None
-        name_input = ft.TextField(label='Fund name', value=fund.name if fund else '')
+        name_input = ft.TextField(
+            label='Fund name', value=fund.name if fund else '', key='fund-name-input'
+        )
         target_input = ft.TextField(
             label='Savings target ($)', value=str(fund.target) if fund else '',
-            keyboard_type=ft.KeyboardType.NUMBER,
+            keyboard_type=ft.KeyboardType.NUMBER, key='fund-target-input',
         )
         balance_input = ft.TextField(
             label='Current balance ($)', value=str(fund.balance) if fund else '',
-            keyboard_type=ft.KeyboardType.NUMBER,
+            keyboard_type=ft.KeyboardType.NUMBER, key='fund-balance-input',
         )
         recurring_input = ft.TextField(
             label='Recurring monthly transfer ($)',
             value=str(fund.recurring_transfer) if fund else '',
-            keyboard_type=ft.KeyboardType.NUMBER,
+            keyboard_type=ft.KeyboardType.NUMBER, key='fund-recurring-input',
         )
         target_date = fund.target_date if fund else None
         date_label = 'Target date: ' + (fund.target_date_as_str() if fund else 'None')
@@ -248,6 +267,7 @@ class FundDialog:
         date_button = ft.Button(
             content=date_label,
             icon=ft.Icons.CALENDAR_MONTH,
+            key='fund-date-button',
             on_click=lambda e: self.page.show_dialog(date_picker),
         )
 
@@ -299,11 +319,17 @@ class FundDialog:
                 self.page.pop_dialog()
                 self.on_changed()
 
-            actions.append(ft.FilledButton('Delete', bgcolor=colors.RED, on_click=delete))
-            actions.append(ft.TextButton('Cancel', on_click=lambda e: self.page.pop_dialog()))
+            actions.append(ft.FilledButton(
+                'Delete', key='fund-delete-button', bgcolor=colors.RED, on_click=delete
+            ))
+            actions.append(ft.TextButton(
+                'Cancel', key='fund-cancel-button', on_click=lambda e: self.page.pop_dialog()
+            ))
         else:
-            actions.append(ft.TextButton('Cancel', on_click=lambda e: self.page.pop_dialog()))
-        actions.append(ft.FilledButton('Save', on_click=save))
+            actions.append(ft.TextButton(
+                'Cancel', key='fund-cancel-button', on_click=lambda e: self.page.pop_dialog()
+            ))
+        actions.append(ft.FilledButton('Save', key='fund-save-button', on_click=save))
 
         self.control = ft.AlertDialog(
             title='Modify fund' if modifying else 'Add fund',
@@ -365,6 +391,7 @@ class SavingsSummary:
             border=ft.Border.all(1, colors.BORDER),
             border_radius=18,
             padding=22,
+            key='savings-summary',
             on_click=self._edit_account_balance,
         )
 
@@ -451,6 +478,7 @@ class FundCard:
             padding=16,
             expand=True,
             margin=ft.Margin.only(bottom=8),
+            key=f'fund-card-{fund.name}',
             on_click=self._edit,
         )
         self.refresh()
@@ -487,7 +515,8 @@ class FundList:
         self.on_changed = on_changed
         self.dialog = FundDialog(page, funds, self._funds_changed)
         self.add_button = ft.OutlinedButton(
-            'Add fund', icon=ft.Icons.ADD_CIRCLE_OUTLINE, expand=True, on_click=self._add_fund
+            'Add fund', icon=ft.Icons.ADD_CIRCLE_OUTLINE, expand=True,
+            key='add-fund-button', on_click=self._add_fund
         )
         self.list_view = ft.ReorderableListView(
             expand=True, spacing=12, on_reorder=self._reorder
@@ -597,6 +626,7 @@ class SettingsView:
             border=ft.Border.all(1, colors.BORDER),
             border_radius=14,
             ink=True,
+            key='nextcloud-settings-card',
             on_click=self._modify_nextcloud,
         )
         self.control = ft.Container(
@@ -609,6 +639,7 @@ class SettingsView:
                             ft.IconButton(
                                 icon=ft.Icons.ARROW_BACK,
                                 tooltip='Back to dashboard',
+                                key='settings-back-button',
                                 on_click=lambda e: on_back(),
                             ),
                             ft.Text('Settings', size=24, weight=ft.FontWeight.BOLD, expand=True),

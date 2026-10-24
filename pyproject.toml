@@ -18,6 +18,16 @@ dev = [
     'flet-cli>=1.0.4',
     'flet-desktop>=1.0.4',
     'flet-web>=1.0.4',
+    'flet[test]',
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = 'auto'
+testpaths = ['tests']
+pythonpath = ['src']
+markers = [
+    'first_run: start the application without saved local configuration or balance',
+    'seed_funds(funds): initialize the isolated test store with the supplied funds',
 ]
 
 [tool.flet]
