@@ -533,6 +533,22 @@ release target is native Flet packages for supported platforms. See
 
 **Goal:** every dollar movement is recorded locally.
 
+**v0.3.0 branch status (2026-10-29):**
+
+- [x] SQLite ledger schema, repository, and schema migration.
+- [x] Accounts with opening balances and derived current/cleared balances.
+- [x] Transaction add/edit/delete with date, payee, memo, category, account,
+  cleared state, search, filters, and undo.
+- [x] Transfers between accounts.
+- [x] One-time migration of existing balance/fund/budget totals.
+- [x] Register and account management UI; budget and savings remain available.
+- [x] CSV/JSON export and JSON import UI.
+- [x] EveryDollar-inspired budget layout and light/dark theme toggle.
+- [x] Property-based money tests and import fault-injection coverage.
+- [x] Migration fixtures cover the current JSON sample data.
+- [ ] Verify migration against a real user dataset.
+- [x] v0.3.0 release notes and version bump.
+
 - SQLite schema + repositories + migrations.
 - Accounts (checking, savings, cash, credit) and opening balances.
 - Transactions: add/edit/delete, date, payee, memo, category, account, cleared,

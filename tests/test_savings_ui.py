@@ -55,7 +55,7 @@ async def test_first_run_skips_nextcloud_and_sets_account_balance(headless_app):
     await enter(page, 'account-balance-input', '1234.50')
     await click(page, 'account-balance-save')
 
-    assert len(find_by_text(page, '$1,234.50')) == 1
+    assert len(find_by_text(page, '$1,234.50')) >= 1
     assert headless_app.paths['balance'].read_text(encoding='utf-8') == '1234.50'
     assert json.loads(headless_app.paths['nextcloud'].read_text(encoding='utf-8')) == {}
 

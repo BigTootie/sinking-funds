@@ -9,6 +9,7 @@ import pytest
 
 import app as app_module
 import data
+import ledger
 import nextcloud
 from budget import BudgetCategory, BudgetState
 from nextcloud import SyncConflictError, SyncResult
@@ -62,6 +63,7 @@ def patch_app_paths(monkeypatch, tmp_path):
         monkeypatch.setattr(module, 'FUNDS_FILE', paths['funds'])
         monkeypatch.setattr(module, 'BUDGET_FILE', paths['budget'])
         monkeypatch.setattr(module, 'BUDGET_HISTORY_FILE', paths['history'])
+    monkeypatch.setattr(ledger, 'LEDGER_DB', tmp_path / 'ledger.db')
     monkeypatch.setattr(nextcloud, 'NEXTCLOUD_DATA_FILE', paths['config'])
     monkeypatch.setattr(nextcloud, 'SYNC_STATE_FILE', paths['state'])
     monkeypatch.setattr(app_module, 'NEXTCLOUD_DATA_FILE', paths['config'])

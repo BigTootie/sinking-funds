@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import flet as ft
 
+import colors
 from budget import (
     BudgetCategory,
     reorder_budget_categories,
@@ -187,18 +188,17 @@ def test_generated_fund_expense_is_rendered_in_the_expenses_section():
     ]
 
 
-def test_budget_cards_keep_compact_layout_and_aligned_balance_buttons():
+def test_budget_rows_keep_compact_layout_and_aligned_balance_buttons():
     category = BudgetCategory('Rent', 1000)
     dashboard = BudgetDashboard(SimpleNamespace(width=800), [category], lambda: None)
-    card_content = dashboard.cards[0].control.content
-    assert card_content.margin.right == 22
-    actions = card_content.controls[0].controls[-1]
-    assert len(actions.controls) == 2
-    assert actions.controls[0].key == f'budget-add-{category.category_id}'
-    assert actions.controls[1].key == f'budget-remove-{category.category_id}'
-    assert actions.controls[0].size_constraints.min_height == 30
-    assert dashboard.cards[0].name.size == 17
-    assert dashboard.expense_list.height == 130
+    row = dashboard.cards[0]
+    row_controls = row.control.content.controls
+    assert [control.key for control in row_controls[-2:]] == [
+        f'budget-add-{category.category_id}',
+        f'budget-remove-{category.category_id}',
+    ]
+    assert row.name.size == 15
+    assert dashboard.expense_list.height == 58
     assert dashboard.expense_list.scroll.value == 'hidden'
 
 
@@ -208,7 +208,7 @@ def test_income_card_describes_extra_income_as_above_plan():
     card = dashboard.cards[0]
 
     assert card.remaining.value == '$50.00 above plan'
-    assert card.remaining.color == '#4ADE80'
+    assert card.remaining.color == colors.GREEN
 
 
 def test_savings_page_uses_one_page_level_scroller():

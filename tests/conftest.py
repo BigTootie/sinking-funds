@@ -36,6 +36,7 @@ async def headless_app(tmp_path, monkeypatch, request):
     """Run the real app and Flet control tree without a Flutter host."""
     import app as app_module
     import data
+    import ledger
     import nextcloud
     import ui.settings as settings_ui
 
@@ -43,6 +44,7 @@ async def headless_app(tmp_path, monkeypatch, request):
     funds_path = tmp_path / 'funds.json'
     budget_path = tmp_path / 'budget.json'
     history_path = tmp_path / 'budget_history.json'
+    ledger_path = tmp_path / 'ledger.db'
     config_path = tmp_path / 'nextcloud_sync.json'
     sync_state_path = tmp_path / 'sync_state.json'
 
@@ -52,6 +54,7 @@ async def headless_app(tmp_path, monkeypatch, request):
     monkeypatch.setattr(data, 'FUNDS_FILE', funds_path)
     monkeypatch.setattr(data, 'BUDGET_FILE', budget_path)
     monkeypatch.setattr(data, 'BUDGET_HISTORY_FILE', history_path)
+    monkeypatch.setattr(ledger, 'LEDGER_DB', ledger_path)
     monkeypatch.setattr(nextcloud, 'ACCOUNT_BALANCE_FILE', balance_path)
     monkeypatch.setattr(nextcloud, 'FUNDS_FILE', funds_path)
     monkeypatch.setattr(nextcloud, 'BUDGET_FILE', budget_path)

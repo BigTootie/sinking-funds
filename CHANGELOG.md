@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.3.0 — 2026-10-29
+
+### Local ledger
+
+- Add a local SQLite ledger with accounts, transactions, transfers, and schema
+  migrations.
+- Derive account balances and cleared balances from ledger transactions.
+- Add account creation/editing and opening balances.
+- Add transaction add/edit/delete, dates, payee, memo, category, account,
+  cleared state, transfers, search, filters, and undo after deletion.
+- Import the existing account balance, funds, and budget totals into the ledger
+  once, with an opening balance transaction and migration records.
+- Keep the savings and budget dashboards working while account totals come from
+  the ledger.
+
+### UI
+
+- Rework the budget page into a cleaner EveryDollar-inspired layout with a
+  monthly summary panel, compact budget rows, planned/remaining columns, and a
+  progress ring.
+- Add a blue-accented light theme and a dark/light toggle in Settings.
+- Add a Transactions page with account cards, register, search, filters, and
+  CSV/JSON export plus JSON import.
+- Improve the savings page styling through the shared semantic theme.
+
+### Quality
+
+- Add SQLite ledger tests, migration tests, register UI tests, and theme tests.
+- Keep the full offline suite, Ruff, formatting, and mypy checks green.
+
 ## 0.2.0 — 2026-10-28
 
 ### Data safety

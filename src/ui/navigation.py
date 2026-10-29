@@ -39,6 +39,12 @@ class AppPageNavigation:
                     label='Savings',
                     key='nav-savings',
                 ),
+                ft.NavigationBarDestination(
+                    icon=ft.Icons.RECEIPT_LONG_OUTLINED,
+                    selected_icon=ft.Icons.RECEIPT_LONG,
+                    label='Transactions',
+                    key='nav-transactions',
+                ),
             ],
             selected_index=1,
             bgcolor=colors.SURFACE,
@@ -48,8 +54,9 @@ class AppPageNavigation:
         self.page.navigation_bar = self.navigation_bar
 
     def _on_navigation_change(self, e):
-        # Bottom bar order is Budget, Savings; app content order remains Savings, Budget.
-        self.selected_index = 1 if e.control.selected_index == 0 else 0
+        # Bottom bar order is Budget, Savings, Transactions; app content order
+        # remains Savings, Budget, Transactions.
+        self.selected_index = {0: 1, 1: 0, 2: 2}.get(e.control.selected_index, 1)
         for i, container in enumerate(self.page_view.controls):
             container.visible = i == self.selected_index
         self.page.update()

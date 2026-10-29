@@ -40,7 +40,8 @@ async def test_budget_category_lifecycle_and_navigation(headless_app):
 
     card_key = budget_key(app, 'Groceries')
     find_by_key(page, card_key)
-    assert len(find_by_text(page, '$350.00 spent of $1,200.00')) == 1
+    assert len(find_by_text(page, '$350.00 spent this month')) == 1
+    assert len(find_by_text(page, '$850.00')) == 1
     saved = json.loads(headless_app.paths['budget'].read_text(encoding='utf-8'))
     assert saved['period']
     assert saved['categories'] == [

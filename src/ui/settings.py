@@ -209,6 +209,8 @@ class SettingsView:
         on_export: Callable[[], None] | None = None,
         on_restore: Callable[[], None] | None = None,
         on_open_data_folder: Callable[[], None] | None = None,
+        theme_mode: str = 'dark',
+        on_theme_change: Callable[[str], None] | None = None,
     ):
         self.page = page
         self.nextcloud_dialog = nextcloud_dialog
@@ -217,6 +219,47 @@ class SettingsView:
         self.on_export = on_export
         self.on_restore = on_restore
         self.on_open_data_folder = on_open_data_folder
+        self.on_theme_change = on_theme_change
+        self.theme_switch = ft.Switch(
+            label='Light mode',
+            value=theme_mode == 'light',
+            key='theme-mode-switch',
+            on_change=lambda e: (
+                self.on_theme_change('light' if e.control.value else 'dark')
+                if self.on_theme_change
+                else None
+            ),
+        )
+        self.appearance_card = ft.Container(
+            content=ft.Row(
+                [
+                    ft.Icon(ft.Icons.PALETTE_OUTLINED, color=colors.BLUE),
+                    ft.Column(
+                        [
+                            ft.Text(
+                                'Appearance',
+                                size=15,
+                                weight=ft.FontWeight.W_600,
+                            ),
+                            ft.Text(
+                                'Choose a light or dark blue theme.',
+                                size=12,
+                                color=colors.TEXT_SECONDARY,
+                            ),
+                        ],
+                        spacing=2,
+                        expand=True,
+                    ),
+                    self.theme_switch,
+                ],
+                spacing=14,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            padding=16,
+            border=ft.Border.all(1, colors.BORDER),
+            border_radius=14,
+            key='appearance-settings-card',
+        )
         self.nextcloud_card = ft.Container(
             content=ft.Row(
                 [
@@ -365,6 +408,7 @@ class SettingsView:
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     ft.Container(height=8),
+                    self.appearance_card,
                     self.nextcloud_card,
                     self.disable_sync_button,
                     self.data_card,

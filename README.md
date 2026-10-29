@@ -16,13 +16,17 @@ or web app. See [`CHANGELOG.md`](CHANGELOG.md) for release notes.
 - Archive the budget at the end of each month and reset the spent amounts
   automatically. A manual **Reset month** action archives the current snapshot
   and starts the current month over.
-- Optionally synchronize the account balance, funds, budget, and budget history
-  with Nextcloud.
+- Track accounts and transactions in a local SQLite ledger, including transfers,
+  cleared balances, search, filters, and undo after deletion.
+- Export ledger data as CSV or JSON and import a JSON ledger snapshot.
+- Switch between a blue-accented dark theme and a clean light theme in Settings.
+- Optionally synchronize account/fund/budget totals with Nextcloud.
 
-The bottom navigation opens Budget on the left and Savings on the right. Fund
-cards and budget items can be reordered within their list. Use the plus and
-minus buttons to adjust current balances; editing a card lets you change its
-target or other details. Destructive actions ask for confirmation.
+The bottom navigation opens Budget, Savings, and Transactions. The budget page
+uses a clean EveryDollar-inspired list with a right-side monthly summary. Fund
+cards and budget rows can be reordered. Use the plus and minus controls to
+adjust actual amounts; editing a row lets you change its details. Destructive
+actions ask for confirmation.
 
 ## Run the app
 
@@ -60,11 +64,15 @@ exist. Existing data always wins; migration never overwrites it.
 | `funds.json` | Savings funds with stable IDs, targets, balances, dates, and contributions |
 | `budget.json` | Current budget period, income/expense items, and budgeted/current amounts |
 | `budget_history.json` | Archived budget periods created by rollover or manual reset |
+| `ledger.db` | Local SQLite accounts and transaction register |
 | `nextcloud_sync.json` | Nextcloud connection settings (password stored separately) |
 | `sync_state.json` | Last synchronized content hashes and ETags |
 
 The JSON files use schema version 3 and stable fund/category IDs. Older
-unversioned funds and budget files are still read automatically.
+unversioned funds and budget files are still read automatically. Existing
+balances and budget/fund totals are imported once into the local ledger as a
+dated opening balance and migration records. New account balances are derived
+from ledger transactions.
 
 Data is written atomically. Before a file is replaced, a rolling copy is kept in
 `backups/` (the ten most recent backups per file). Damaged files are never

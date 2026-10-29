@@ -37,6 +37,7 @@ from data import (
     save_funds_to_json,
 )
 from fund import Fund
+from ledger import Ledger, LedgerError
 from nextcloud import (
     NEXTCLOUD_DATA_FILE,
     SyncConflictError,
@@ -52,6 +53,7 @@ from ui.navigation import AppPageNavigation
 from ui.savings import Dashboard
 from ui.settings import AppHeader, NextcloudConfigDialog, SettingsView
 from ui.shared import AccountBalanceDialog, ConfirmDialog, LoadingDialog, MessageDialog
+from ui.transactions import TransactionsDashboard
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +67,9 @@ class SavingsFundsApp:
 
     def __init__(self, page: ft.Page):
         self.page = page
+        self.ledger = Ledger()
+        self.theme_mode = self.ledger.get_meta('theme_mode', 'dark') or 'dark'
+        self.transactions_dashboard = None
         self.nextcloud_sync_data = None
         self.funds: list[Fund] = []
         self.budget_state = BudgetState([], current_period())
@@ -84,11 +89,11 @@ class SavingsFundsApp:
 
     def _initialize_page(self):
         self.page.title = 'Savings Funds'
-        self.page.theme_mode = ft.ThemeMode.DARK
-        self.page.bgcolor = colors.BACKGROUND
-        self.page.theme = ft.Theme(
-            color_scheme=ft.ColorScheme(primary=colors.BLUE, surface=colors.SURFACE)
+        self.page.theme_mode = (
+            ft.ThemeMode.DARK if self.theme_mode == 'dark' else ft.ThemeMode.LIGHT
         )
+        self.page.bgcolor = colors.BACKGROUND
+        self.page.theme = colors.theme_for(self.theme_mode)
         self.page.scroll = None
         self.page.on_resized = lambda e: self._resize_dashboard()
         if isinstance(self.page, ft.Page):
@@ -109,6 +114,8 @@ class SavingsFundsApp:
             self._export_data,
             self._restore_latest_backup,
             self._open_data_folder,
+            self.theme_mode,
+            self.set_theme_mode,
         )
 
         self.page.add(
@@ -429,6 +436,19 @@ class SavingsFundsApp:
             # Do not write incomplete state over files that failed to load.
             self.startup_notice = None
 
+        had_balance = self.account_balance is not None
+        try:
+            self.ledger.seed_legacy(
+                self.account_balance,
+                self.funds,
+                self.budget_categories,
+                self.budget_state.period,
+            )
+            if had_balance:
+                self.account_balance = self.ledger.total_balance()
+        except (LedgerError, OSError) as exc:
+            self.startup_errors.append(f'Could not initialize the local ledger: {exc}')
+
         if self.account_balance is None:
             dialog = AccountBalanceDialog(self.page, self.set_account_balance)
             dialog.add(self.initialize_dashboard, on_skip=self.initialize_dashboard)
@@ -487,11 +507,36 @@ class SavingsFundsApp:
             self._sync_file_in_background(BUDGET_FILE)
 
     def set_account_balance(self, value):
-        self.account_balance = value
+        try:
+            self.ledger.set_total_balance(value)
+        except LedgerError as exc:
+            self._show_snack(f'Could not update the ledger: {exc}', colors.RED)
+            return
+        self.account_balance = self.ledger.total_balance()
         if self._save_data(
             lambda: save_balance_to_txt(self.account_balance), 'balance.txt'
         ):
             self._sync_file_in_background(ACCOUNT_BALANCE_FILE)
+
+    def _on_ledger_changed(self):
+        self.account_balance = self.ledger.total_balance()
+        if self._save_data(
+            lambda: save_balance_to_txt(self.account_balance), 'balance.txt'
+        ):
+            self._sync_file_in_background(ACCOUNT_BALANCE_FILE)
+        self.refresh_page()
+
+    def set_theme_mode(self, mode):
+        if mode not in {'dark', 'light'}:
+            return
+        self.theme_mode = mode
+        self.ledger.set_meta('theme_mode', mode)
+        self.page.theme_mode = (
+            ft.ThemeMode.DARK if mode == 'dark' else ft.ThemeMode.LIGHT
+        )
+        self.page.theme = colors.theme_for(mode)
+        self.page.bgcolor = colors.BACKGROUND
+        self.page.update()
 
     def initialize_dashboard(self):
         self.dashboard = Dashboard(
@@ -508,8 +553,16 @@ class SavingsFundsApp:
             self.budget_state.period,
             self._reset_budget_month,
         )
+        self.transactions_dashboard = TransactionsDashboard(
+            self.page, self.ledger, self._on_ledger_changed
+        )
         self.navigation = AppPageNavigation(
-            self.page, [self.dashboard.control, self.budget_dashboard.control]
+            self.page,
+            [
+                self.dashboard.control,
+                self.budget_dashboard.control,
+                self.transactions_dashboard.control,
+            ],
         )
         self.page.add(self.navigation.page_view)
         self.page.update()

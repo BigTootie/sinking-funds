@@ -20,6 +20,8 @@ funds.json
 budget.json
 budget_history.json
 sync_state.json
+ledger.db
+ledger.db-*
 backups/
 *.corrupt-*
 *.remote-*.conflict

@@ -15,8 +15,9 @@ Inspect the actual repository before making changes. Preserve the existing separ
 - `src/app.py`: application initialization, startup flow, persistence coordination, and background synchronization.
 - `src/main.py`: resolves durable storage before importing modules that bind data paths.
 - `src/paths.py`: resolves `FLET_APP_STORAGE_DATA` (falling back to the working directory) and migrates legacy data.
-- `src/ui/`: reusable pages, dialogs, cards, navigation, and presentation. `shared.py` holds cross-page dialogs.
+- `src/ui/`: reusable pages, dialogs, cards, navigation, and presentation. `shared.py` holds cross-page dialogs; `transactions.py` holds the ledger register.
 - `src/data.py`: atomic local persistence, backups, quarantine, schema loading, and budget history.
+- `src/ledger.py`: local SQLite accounts, transactions, transfers, and ledger import/export.
 - `src/nextcloud.py`: Nextcloud WebDAV, validation, reconciliation, conflict copies, and sync state.
 - `src/fund.py` and `src/budget.py`: models and pure calculations.
 - `src/utils.py`: money parsing/formatting; `src/colors.py`: shared styling.
@@ -32,6 +33,7 @@ Treat this list as guidance; the implementation in the repository is authoritati
 - Never overwrite real user data during tests. Patch the data path constants to `tmp_path`.
 - Keep `nextcloud_sync.json` private. Store the Nextcloud password in the OS keyring when available, with the private-file fallback only when it is not. Never hard-code credentials or log secrets.
 - Budget periods roll over on startup. Archives belong in `budget_history.json`.
+- The ledger SQLite database is local-only. Do not sync a live `ledger.db`; use ledger JSON/CSV export for portability.
 
 ## Synchronization
 - Keep blocking network calls off the UI event loop.
