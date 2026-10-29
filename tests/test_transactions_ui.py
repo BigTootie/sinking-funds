@@ -116,3 +116,37 @@ async def test_savings_balance_change_refreshes_the_register(headless_app):
 
     assert app.ledger.total_balance() == Decimal('5500.00')
     assert len(find_by_text(page, 'Balance adjustment')) == 1
+
+
+async def test_account_opening_and_edit_create_ledger_transactions(headless_app):
+    app = headless_app.app
+    page = headless_app.page
+    navigate(page, app, 2)
+
+    await click(page, 'add-account-button')
+    await enter(page, 'account-name-input', 'Checking')
+    await enter(page, 'account-opening-input', '250')
+    await click(page, 'account-save-button')
+
+    account = next(a for a in app.ledger.list_accounts() if a.name == 'Checking')
+    opening = [
+        item
+        for item in app.ledger.list_transactions(search='Opening balance')
+        if item.account_id == account.id
+    ]
+    assert len(opening) == 1
+    assert opening[0].amount == Decimal('250.00')
+
+    await click(page, f'account-card-{account.id}')
+    await enter(page, 'account-opening-input', '400')
+    await click(page, 'account-save-button')
+    adjustments = app.ledger.list_transactions(search='Balance adjustment')
+    assert len(adjustments) == 1
+    assert adjustments[0].amount == Decimal('150.00')
+    assert len(find_by_text(page, 'Balance adjustment')) == 1
+
+    await click(page, f'account-card-{account.id}')
+    await click(page, 'account-delete-button')
+    await click(page, 'confirm-action-button')
+    assert all(a.id != account.id for a in app.ledger.list_accounts())
+    assert find_by_key(page, f'account-card-{account.id}', count=0) == []

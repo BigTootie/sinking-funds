@@ -44,7 +44,7 @@ def test_transfer_moves_money_without_changing_total(tmp_path):
     assert accounts['Checking'].balance == Decimal('750.00')
     assert accounts['Savings'].balance == Decimal('250.00')
     assert ledger.total_balance() == Decimal('1000.00')
-    assert len(ledger.list_transactions()) == 2
+    assert len([t for t in ledger.list_transactions() if t.transfer_id]) == 2
 
 
 def test_transaction_update_search_filter_and_delete_undo(tmp_path):
@@ -136,7 +136,7 @@ def test_ledger_export_import_round_trip(tmp_path):
     other = make_ledger(tmp_path / 'other')
     other.import_json(export)
     assert other.total_balance() == Decimal('90.00')
-    assert other.list_transactions()[0].payee == 'Store'
+    assert other.list_transactions(search='Store')[0].payee == 'Store'
 
 
 def test_invalid_account_and_transfer_are_rejected(tmp_path):
@@ -173,4 +173,4 @@ def test_failed_import_rolls_back_existing_ledger(tmp_path):
         ledger.import_json(bad_export)
 
     assert ledger.total_balance() == before
-    assert ledger.list_transactions()[0].payee == 'Store'
+    assert ledger.list_transactions(search='Store')[0].payee == 'Store'

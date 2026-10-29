@@ -260,48 +260,99 @@ class SettingsView:
             border_radius=14,
             key='appearance-settings-card',
         )
+        self.disable_sync_item = ft.PopupMenuItem(
+            content=ft.Text('Disable sync'),
+            icon=ft.Icons.CLOUD_OFF_OUTLINED,
+            key='disable-nextcloud-button',
+            on_click=self._confirm_disable_sync,
+        )
+        nextcloud_trailing: list[ft.Control] = [
+            ft.Icon(ft.Icons.CHEVRON_RIGHT, color=colors.TEXT_SECONDARY)
+        ]
+        if self.on_disable_sync is not None:
+            nextcloud_trailing.insert(
+                0,
+                ft.PopupMenuButton(
+                    icon=ft.Icons.MORE_VERT,
+                    tooltip='Nextcloud actions',
+                    items=[self.disable_sync_item],
+                ),
+            )
         self.nextcloud_card = ft.Container(
             content=ft.Row(
                 [
                     ft.Container(
-                        content=ft.Icon(
-                            ft.Icons.CLOUD_OUTLINED, size=24, color=colors.BLUE
+                        content=ft.Row(
+                            [
+                                ft.Container(
+                                    content=ft.Icon(
+                                        ft.Icons.CLOUD_OUTLINED,
+                                        size=22,
+                                        color=colors.BLUE,
+                                    ),
+                                    bgcolor=colors.SURFACE,
+                                    border_radius=10,
+                                    padding=11,
+                                ),
+                                ft.Column(
+                                    [
+                                        ft.Text(
+                                            'Nextcloud Sync',
+                                            size=15,
+                                            weight=ft.FontWeight.W_600,
+                                        ),
+                                        ft.Text(
+                                            'Manage the server connection and synchronization.',
+                                            size=12,
+                                            color=colors.TEXT_SECONDARY,
+                                        ),
+                                    ],
+                                    spacing=2,
+                                    expand=True,
+                                ),
+                            ],
+                            spacing=12,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         ),
-                        bgcolor=colors.SURFACE,
-                        border_radius=10,
-                        padding=12,
-                    ),
-                    ft.Column(
-                        [
-                            ft.Text(
-                                'Nextcloud Sync', size=15, weight=ft.FontWeight.W_600
-                            ),
-                            ft.Text(
-                                'Configure server connection and sync settings',
-                                size=12,
-                                color=colors.TEXT_SECONDARY,
-                            ),
-                        ],
-                        spacing=4,
                         expand=True,
+                        ink=True,
+                        key='nextcloud-settings-card',
+                        on_click=self._modify_nextcloud,
                     ),
-                    ft.Icon(ft.Icons.CHEVRON_RIGHT, color=colors.TEXT_SECONDARY),
+                    *nextcloud_trailing,
                 ],
-                spacing=14,
+                spacing=12,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
             padding=16,
             border=ft.Border.all(1, colors.BORDER),
             border_radius=14,
-            ink=True,
-            key='nextcloud-settings-card',
-            on_click=self._modify_nextcloud,
         )
-        self.disable_sync_button = ft.TextButton(
-            'Disable Nextcloud sync',
-            icon=ft.Icons.CLOUD_OFF_OUTLINED,
-            key='disable-nextcloud-button',
-            on_click=self._confirm_disable_sync,
+        self.backup_button = ft.FilledButton(
+            'Back up now',
+            icon=ft.Icons.ARCHIVE_OUTLINED,
+            key='backup-data-button',
+            on_click=lambda e: self.on_backup() if self.on_backup else None,
+        )
+        self.export_item = ft.PopupMenuItem(
+            content=ft.Text('Export data'),
+            icon=ft.Icons.DOWNLOAD_OUTLINED,
+            key='export-data-button',
+            on_click=lambda e: self.on_export() if self.on_export else None,
+        )
+        self.restore_item = ft.PopupMenuItem(
+            content=ft.Text('Restore latest backup'),
+            icon=ft.Icons.RESTORE,
+            key='restore-data-button',
+            on_click=lambda e: self.on_restore() if self.on_restore else None,
+        )
+        self.open_folder_item = ft.PopupMenuItem(
+            content=ft.Text('Open data folder'),
+            icon=ft.Icons.FOLDER_OPEN_OUTLINED,
+            key='open-data-folder-button',
+            on_click=lambda e: (
+                self.on_open_data_folder() if self.on_open_data_folder else None
+            ),
         )
         self.data_card = ft.Container(
             content=ft.Column(
@@ -310,11 +361,11 @@ class SettingsView:
                         [
                             ft.Container(
                                 content=ft.Icon(
-                                    ft.Icons.SAVE_OUTLINED, size=24, color=colors.BLUE
+                                    ft.Icons.SAVE_OUTLINED, size=22, color=colors.BLUE
                                 ),
                                 bgcolor=colors.SURFACE,
                                 border_radius=10,
-                                padding=12,
+                                padding=11,
                             ),
                             ft.Column(
                                 [
@@ -324,58 +375,33 @@ class SettingsView:
                                         weight=ft.FontWeight.W_600,
                                     ),
                                     ft.Text(
-                                        'Create a local backup or export your data '
-                                        '(credentials excluded)',
+                                        'Back up or move your local data. Credentials are excluded.',
                                         size=12,
                                         color=colors.TEXT_SECONDARY,
                                     ),
                                 ],
-                                spacing=4,
+                                spacing=2,
                                 expand=True,
                             ),
                         ],
-                        spacing=14,
+                        spacing=12,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     ft.Row(
                         [
-                            ft.FilledButton(
-                                'Back up now',
-                                icon=ft.Icons.ARCHIVE_OUTLINED,
-                                key='backup-data-button',
-                                on_click=lambda e: (
-                                    self.on_backup() if self.on_backup else None
-                                ),
-                            ),
-                            ft.OutlinedButton(
-                                'Export data',
-                                icon=ft.Icons.DOWNLOAD_OUTLINED,
-                                key='export-data-button',
-                                on_click=lambda e: (
-                                    self.on_export() if self.on_export else None
-                                ),
-                            ),
-                            ft.TextButton(
-                                'Restore latest backup',
-                                icon=ft.Icons.RESTORE,
-                                key='restore-data-button',
-                                on_click=lambda e: (
-                                    self.on_restore() if self.on_restore else None
-                                ),
-                            ),
-                            ft.TextButton(
-                                'Open data folder',
-                                icon=ft.Icons.FOLDER_OPEN_OUTLINED,
-                                key='open-data-folder-button',
-                                on_click=lambda e: (
-                                    self.on_open_data_folder()
-                                    if self.on_open_data_folder
-                                    else None
-                                ),
+                            self.backup_button,
+                            ft.PopupMenuButton(
+                                icon=ft.Icons.MORE_HORIZ,
+                                tooltip='More data actions',
+                                items=[
+                                    self.export_item,
+                                    self.restore_item,
+                                    self.open_folder_item,
+                                ],
                             ),
                         ],
-                        spacing=10,
-                        wrap=True,
+                        spacing=8,
+                        alignment=ft.MainAxisAlignment.END,
                     ),
                 ],
                 spacing=12,
@@ -410,7 +436,6 @@ class SettingsView:
                     ft.Container(height=8),
                     self.appearance_card,
                     self.nextcloud_card,
-                    self.disable_sync_button,
                     self.data_card,
                 ],
                 spacing=16,

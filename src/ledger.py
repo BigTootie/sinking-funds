@@ -176,6 +176,39 @@ class Ledger:
                     'INSERT INTO meta(key, value) VALUES (?, ?)',
                     ('default_account_migrated', '1'),
                 )
+            balances_migrated = connection.execute(
+                'SELECT 1 FROM meta WHERE key = ?', ('opening_balances_migrated',)
+            ).fetchone()
+            if balances_migrated is None:
+                for row in connection.execute(
+                    'SELECT id, opening_balance_minor FROM accounts '
+                    'WHERE opening_balance_minor != 0'
+                ).fetchall():
+                    connection.execute(
+                        'INSERT INTO transactions '
+                        '(id, account_id, date, payee, memo, amount_minor, category, '
+                        'cleared, transfer_id, fund_id, created_at, updated_at) '
+                        'VALUES (?, ?, ?, ?, ?, ?, ?, 1, NULL, NULL, ?, ?)',
+                        (
+                            uuid4().hex,
+                            row['id'],
+                            date.today().isoformat(),
+                            'Opening balance',
+                            'Migrated opening balance',
+                            row['opening_balance_minor'],
+                            'Opening balance',
+                            _now(),
+                            _now(),
+                        ),
+                    )
+                    connection.execute(
+                        'UPDATE accounts SET opening_balance_minor = 0 WHERE id = ?',
+                        (row['id'],),
+                    )
+                connection.execute(
+                    'INSERT INTO meta(key, value) VALUES (?, ?)',
+                    ('opening_balances_migrated', '1'),
+                )
 
     def get_meta(self, key: str, default: str | None = None) -> str | None:
         with self._connect() as connection:
@@ -343,36 +376,60 @@ class Ledger:
             connection.execute(
                 'INSERT INTO accounts '
                 '(id, name, type, currency, opening_balance_minor, archived, created_at) '
-                'VALUES (?, ?, ?, ?, ?, 0, ?)',
-                (
-                    account_id,
-                    name,
-                    account_type,
-                    'USD',
-                    money_to_minor(opening_balance),
-                    _now(),
-                ),
+                'VALUES (?, ?, ?, ?, 0, 0, ?)',
+                (account_id, name, account_type, 'USD', _now()),
             )
+        self.adjust_account_balance(
+            account_id,
+            opening_balance,
+            payee='Opening balance',
+            memo='Initial deposit',
+            category='Opening balance',
+        )
         return next(a for a in self.list_accounts() if a.id == account_id)
 
-    def update_account(
-        self,
-        account_id: str,
-        name: str,
-        account_type: str,
-        opening_balance: Decimal | str,
-    ) -> None:
+    def update_account(self, account_id: str, name: str, account_type: str) -> None:
         name = name.strip()
         if not name:
             raise LedgerError('account name is required')
         with self._connect() as connection:
             cursor = connection.execute(
-                'UPDATE accounts SET name = ?, type = ?, opening_balance_minor = ? '
-                'WHERE id = ?',
-                (name, account_type, money_to_minor(opening_balance), account_id),
+                'UPDATE accounts SET name = ?, type = ? WHERE id = ?',
+                (name, account_type, account_id),
             )
             if cursor.rowcount == 0:
                 raise LedgerError('account does not exist')
+
+    def adjust_account_balance(
+        self,
+        account_id: str,
+        target: Decimal | str | int,
+        *,
+        payee: str = 'Balance adjustment',
+        memo: str = 'Manual account balance update',
+        category: str = 'Adjustment',
+    ) -> None:
+        account = next(
+            (
+                item
+                for item in self.list_accounts(include_archived=True)
+                if item.id == account_id
+            ),
+            None,
+        )
+        if account is None:
+            raise LedgerError('account does not exist')
+        difference = Decimal(str(target)) - account.balance
+        if difference == 0:
+            return
+        self.add_transaction(
+            account_id,
+            date.today(),
+            payee,
+            memo,
+            difference,
+            category,
+        )
 
     def archive_account(self, account_id: str) -> None:
         with self._connect() as connection:

@@ -32,6 +32,9 @@
 - Show fund budget rows with the remaining amount needed to reach the fund goal
   instead of the confusing planned-vs-spent difference.
 - Lighten the dark theme to a neutral grey palette with blue accents.
+- Record account opening balances and balance edits as ledger transactions, and
+  allow accounts to be deleted from the account editor.
+- Clean up the Settings cards so Nextcloud and data actions use compact menus.
 
 ### Quality
 

@@ -37,8 +37,8 @@ class AccountDialog:
             key='account-type-input',
         )
         opening = ft.TextField(
-            label='Opening balance ($)',
-            value=str(account.opening_balance) if account else '0',
+            label='Current balance ($)' if account else 'Opening balance ($)',
+            value=str(account.balance) if account else '0',
             keyboard_type=ft.KeyboardType.NUMBER,
             key='account-opening-input',
         )
@@ -49,11 +49,9 @@ class AccountDialog:
                 value = parse_signed_money(opening.value or '0')
                 if account:
                     self.ledger.update_account(
-                        account.id,
-                        name.value or '',
-                        account_type.value or 'checking',
-                        value,
+                        account.id, name.value or '', account_type.value or 'checking'
                     )
+                    self.ledger.adjust_account_balance(account.id, value)
                 else:
                     self.ledger.add_account(
                         name.value or '', account_type.value or 'checking', value
@@ -65,21 +63,49 @@ class AccountDialog:
             self.page.pop_dialog()
             self.on_changed()
 
+        actions: list[ft.Control] = []
+        if account:
+
+            def delete(e):
+                self.page.pop_dialog()
+                ConfirmDialog(
+                    self.page,
+                    'Delete account?',
+                    f'Delete "{account.name}"? Its transactions stay in the '
+                    'register but the account will be hidden.',
+                    lambda: self._delete(account.id),
+                ).open()
+
+            actions.append(
+                ft.FilledButton(
+                    'Delete',
+                    key='account-delete-button',
+                    bgcolor=colors.RED,
+                    on_click=delete,
+                )
+            )
+        actions.extend(
+            [
+                ft.TextButton(
+                    'Cancel',
+                    key='account-cancel-button',
+                    on_click=lambda e: self.page.pop_dialog(),
+                ),
+                ft.FilledButton('Save', key='account-save-button', on_click=save),
+            ]
+        )
         self.page.show_dialog(
             ft.AlertDialog(
                 title='Edit account' if account else 'Add account',
                 content=dialog_form([name, account_type, opening, error], height=240),
-                actions=[
-                    ft.TextButton(
-                        'Cancel',
-                        key='account-cancel-button',
-                        on_click=lambda e: self.page.pop_dialog(),
-                    ),
-                    ft.FilledButton('Save', key='account-save-button', on_click=save),
-                ],
+                actions=actions,
                 modal=True,
             )
         )
+
+    def _delete(self, account_id: str):
+        self.ledger.archive_account(account_id)
+        self.on_changed()
 
 
 class TransactionDialog:
@@ -284,8 +310,39 @@ class TransactionsDashboard:
             on_select=lambda e: self.refresh(),
             width=150,
         )
+        self.accounts_label = ft.Text(
+            'ACCOUNTS', size=11, weight=ft.FontWeight.BOLD, color=colors.TEXT_SECONDARY
+        )
         self.account_row = ft.Row(spacing=10, wrap=True)
         self.register = ft.Column(spacing=0)
+        self.register_header = ft.Row(
+            [
+                ft.Text(
+                    'DATE',
+                    size=10,
+                    width=100,
+                    color=colors.TEXT_SECONDARY,
+                    weight=ft.FontWeight.BOLD,
+                ),
+                ft.Text(
+                    'PAYEE / DETAILS',
+                    size=10,
+                    expand=True,
+                    color=colors.TEXT_SECONDARY,
+                    weight=ft.FontWeight.BOLD,
+                ),
+                ft.Text(
+                    'AMOUNT',
+                    size=10,
+                    width=110,
+                    text_align=ft.TextAlign.RIGHT,
+                    color=colors.TEXT_SECONDARY,
+                    weight=ft.FontWeight.BOLD,
+                ),
+                ft.Container(width=18),
+            ],
+            spacing=8,
+        )
         self.control = ft.Container(
             padding=24,
             content=ft.Row(
@@ -346,6 +403,7 @@ class TransactionsDashboard:
                                 border=ft.Border.all(1, colors.BORDER),
                                 border_radius=18,
                             ),
+                            self.accounts_label,
                             self.account_row,
                             ft.Row(
                                 [
@@ -356,10 +414,17 @@ class TransactionsDashboard:
                                 spacing=10,
                             ),
                             ft.Container(
-                                content=self.register,
+                                content=ft.Column(
+                                    [
+                                        self.register_header,
+                                        ft.Divider(height=1, color=colors.BORDER),
+                                        self.register,
+                                    ],
+                                    spacing=0,
+                                ),
                                 border=ft.Border.all(1, colors.BORDER),
                                 border_radius=16,
-                                padding=8,
+                                padding=12,
                             ),
                             ft.Row(
                                 [
@@ -417,22 +482,42 @@ class TransactionsDashboard:
         )
         self.account_row.controls = [
             ft.Container(
-                content=ft.Column(
+                content=ft.Row(
                     [
-                        ft.Text(a.name, size=14, weight=ft.FontWeight.W_600),
-                        ft.Text(
-                            money_format(a.balance), size=20, weight=ft.FontWeight.BOLD
+                        ft.Container(
+                            content=ft.Icon(
+                                ft.Icons.ACCOUNT_BALANCE_OUTLINED,
+                                size=18,
+                                color=colors.BLUE,
+                            ),
+                            bgcolor=colors.SURFACE,
+                            border_radius=9,
+                            padding=8,
                         ),
-                        ft.Text(
-                            f'{money_format(a.cleared_balance)} cleared',
-                            size=11,
-                            color=colors.TEXT_SECONDARY,
+                        ft.Column(
+                            [
+                                ft.Text(a.name, size=14, weight=ft.FontWeight.W_600),
+                                ft.Text(
+                                    money_format(a.balance),
+                                    size=18,
+                                    weight=ft.FontWeight.BOLD,
+                                ),
+                                ft.Text(
+                                    f'{a.type.title()} · {money_format(a.cleared_balance)} cleared',
+                                    size=11,
+                                    color=colors.TEXT_SECONDARY,
+                                ),
+                            ],
+                            spacing=1,
                         ),
                     ],
-                    spacing=2,
+                    spacing=10,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
-                padding=14,
-                border=ft.Border.all(1, colors.BORDER),
+                padding=12,
+                border=ft.Border.all(
+                    1, colors.BLUE if selected == a.id else colors.BORDER
+                ),
                 border_radius=14,
                 ink=True,
                 key=f'account-card-{a.id}',

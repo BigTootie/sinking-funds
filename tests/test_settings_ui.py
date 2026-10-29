@@ -102,13 +102,9 @@ def test_settings_data_buttons_invoke_backup_and_export_callbacks():
         on_restore=lambda: calls.append('restore'),
         on_open_data_folder=lambda: calls.append('open'),
     )
-    buttons = {
-        button.key: button for button in view.data_card.content.controls[1].controls
-    }
-
-    buttons['backup-data-button'].on_click(None)
-    buttons['export-data-button'].on_click(None)
-    buttons['restore-data-button'].on_click(None)
-    buttons['open-data-folder-button'].on_click(None)
+    view.backup_button.on_click(None)
+    view.export_item.on_click(None)
+    view.restore_item.on_click(None)
+    view.open_folder_item.on_click(None)
 
     assert calls == ['backup', 'export', 'restore', 'open']
