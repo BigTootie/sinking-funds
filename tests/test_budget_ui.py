@@ -203,3 +203,26 @@ async def test_existing_fund_contribution_is_visible_on_budget_at_startup(headle
             'source_fund_id': app.funds[0].id,
         }
     ]
+
+
+async def test_left_to_budget_uses_planned_amounts(headless_app):
+    app = await open_budget(headless_app)
+    page = headless_app.page
+
+    await click(page, 'add-budget-income-button')
+    await enter(page, 'budget-category-name-input', 'Paycheck')
+    await enter(page, 'budget-category-budget-input', '4000')
+    await click(page, 'budget-category-save-button')
+
+    await click(page, 'add-budget-expense-button')
+    await enter(page, 'budget-category-name-input', 'Rent')
+    await enter(page, 'budget-category-budget-input', '1000')
+    await click(page, 'budget-category-save-button')
+
+    assert len(find_by_text(page, '$3,000.00 left to budget')) == 2
+
+    await click(page, budget_key(app, 'Rent'))
+    await enter(page, 'budget-category-budget-input', '1250')
+    await click(page, 'budget-category-save-button')
+
+    assert len(find_by_text(page, '$2,750.00 left to budget')) == 2

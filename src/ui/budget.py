@@ -209,9 +209,10 @@ class BudgetSummary:
         expenses = [c for c in categories if c.kind == 'expense']
         income = [c for c in categories if c.kind == 'income']
         planned = sum((c.budgeted for c in expenses), Decimal('0'))
+        planned_income = sum((c.budgeted for c in income), Decimal('0'))
         spent = sum((c.spent for c in expenses), Decimal('0'))
         received = sum((c.spent for c in income), Decimal('0'))
-        left = received - spent
+        left = planned_income - planned
         self.period_text.value = format_period(period) if period else ''
         self.left_to_budget.value = (
             f'{money_format(left)} left to budget'
@@ -500,20 +501,8 @@ class BudgetDashboard:
         self.expense_list.controls = expenses
         self.income_list.height = max(1, len(income) * BUDGET_ROW_HEIGHT)
         self.expense_list.height = max(1, len(expenses) * BUDGET_ROW_HEIGHT)
-        received = sum(
-            (c.spent for c in self.categories if c.kind == 'income'), Decimal('0')
-        )
-        spent = sum(
-            (c.spent for c in self.categories if c.kind == 'expense'), Decimal('0')
-        )
-        self.left_to_budget.value = (
-            f'{money_format(received - spent)} left to budget'
-            if received - spent >= 0
-            else f'{money_format(abs(received - spent))} over budget'
-        )
-        self.left_to_budget.color = (
-            colors.GREEN if received - spent >= 0 else colors.RED
-        )
+        self.left_to_budget.value = self.summary.left_to_budget.value
+        self.left_to_budget.color = self.summary.left_to_budget.color
 
     def resize(self):
         width = self.page.width or 0

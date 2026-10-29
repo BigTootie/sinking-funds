@@ -24,6 +24,8 @@
 - Add a Transactions page with account cards, register, search, filters, and
   CSV/JSON export plus JSON import.
 - Improve the savings page styling through the shared semantic theme.
+- Calculate “left to budget” from planned income minus planned expenses so
+  planned-only rows update both the top banner and summary panel.
 
 ### Quality
 
