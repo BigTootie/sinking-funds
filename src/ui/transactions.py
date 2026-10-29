@@ -398,6 +398,7 @@ class TransactionsDashboard:
     def _changed(self):
         self.on_changed()
         self.refresh()
+        self.page.update()
 
     def refresh(self):
         accounts = self.ledger.list_accounts()

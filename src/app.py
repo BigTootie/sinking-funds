@@ -531,6 +531,7 @@ class SavingsFundsApp:
     def _refresh_ledger_view(self):
         if self.transactions_dashboard is not None:
             self.transactions_dashboard.refresh()
+            self.page.update()
 
     def set_theme_mode(self, mode):
         if mode not in {'dark', 'light'}:
