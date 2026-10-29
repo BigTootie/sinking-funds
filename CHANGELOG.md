@@ -36,6 +36,11 @@
   allow accounts to be deleted from the account editor.
 - Clean up the Settings cards so Nextcloud and data actions use compact menus.
 
+### Notes
+
+- Real-user dataset migration validation was deferred for this release;
+  automated migration fixtures cover representative data.
+
 ### Quality
 
 - Add SQLite ledger tests, migration tests, register UI tests, and theme tests.
@@ -82,6 +87,11 @@
 - Add a `platformdirs` fallback for non-Flet launches.
 - Add an **Open data folder** action in Settings.
 - Add a native standalone Linux executable build path with `flet pack`.
+
+### Notes
+
+- Real-user dataset migration validation was deferred for this release;
+  automated migration fixtures cover representative data.
 
 ### Quality
 

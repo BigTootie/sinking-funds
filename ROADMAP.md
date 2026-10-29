@@ -545,8 +545,8 @@ release target is native Flet packages for supported platforms. See
 - [x] CSV/JSON export and JSON import UI.
 - [x] EveryDollar-inspired budget layout and light/dark theme toggle.
 - [x] Property-based money tests and import fault-injection coverage.
-- [x] Migration fixtures cover the current JSON sample data.
-- [ ] Verify migration against a real user dataset.
+- [x] Migration fixtures cover the current JSON sample data. Real-user dataset
+  validation was deferred by the maintainer for this release.
 - [x] v0.3.0 release notes and version bump.
 
 - SQLite schema + repositories + migrations.
