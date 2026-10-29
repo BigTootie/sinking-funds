@@ -1,10 +1,12 @@
 """Savings fund model and target progress calculations."""
 
 from datetime import datetime
+from decimal import Decimal
+from uuid import uuid4
 
 from dateutil import relativedelta
 
-from utils import money_format
+from utils import money_format, parse_money, parse_signed_money
 
 
 class Fund:
@@ -13,50 +15,62 @@ class Fund:
     def __init__(
         self,
         name: str,
-        target: float,
-        initial_balance: float = 0.0,
+        target,
+        initial_balance=0,
         target_date: datetime | None = None,
-        recurring_transfer: float = 0.0,
+        recurring_transfer=0,
+        fund_id: str | None = None,
     ):
-        self.name = name
-        self.target = target
-        self.balance = initial_balance
+        self.id = fund_id or uuid4().hex
+        self.name = name.strip()
+        if not self.name:
+            raise ValueError('Fund name cannot be empty')
+        self.target = parse_money(target)
+        self.balance = parse_signed_money(initial_balance)
         self.target_date = target_date
-        self.time_remaining = self._compute_time_remaining()
-        self.recurring_transfer = recurring_transfer
-        self.on_track, self.required_recurring_transfer = self._on_track_for_target()
+        self.recurring_transfer = parse_money(recurring_transfer)
 
-    def add(self, amount: float) -> None:
-        self.set_balance(self.balance + amount)
+    @property
+    def is_overdrawn(self) -> bool:
+        """Whether spending has pulled this fund below zero."""
+        return self.balance < 0
 
-    def remove(self, amount: float) -> None:
-        self.set_balance(self.balance - amount)
+    @property
+    def time_remaining(self) -> relativedelta.relativedelta | None:
+        if self.target_date is None:
+            return None
+        today = datetime.today()
+        return relativedelta.relativedelta(
+            self.target_date.replace(tzinfo=None), today.replace(tzinfo=None)
+        )
 
-    def set_target(self, value: float) -> None:
-        self.target = value
-        self.on_track, self.required_recurring_transfer = self._on_track_for_target()
+    @property
+    def on_track(self) -> bool | None:
+        return self._on_track_for_target()[0]
 
-    def set_balance(self, value: float) -> None:
-        self.balance = value
-        self.on_track, self.required_recurring_transfer = self._on_track_for_target()
+    @property
+    def required_recurring_transfer(self) -> Decimal | None:
+        return self._on_track_for_target()[1]
 
-    def compute_percent_funded(self) -> float:
-        if self.target <= 0:
-            return 0.0
-        return round(self.balance / self.target * 100, 2)
+    def add(self, amount) -> None:
+        self.set_balance(self.balance + parse_money(amount))
+
+    def remove(self, amount) -> None:
+        self.set_balance(self.balance - parse_money(amount))
+
+    def set_target(self, value) -> None:
+        self.target = parse_money(value)
+
+    def set_balance(self, value) -> None:
+        self.balance = parse_signed_money(value)
+
+    def compute_percent_funded(self) -> Decimal:
+        if self.target <= 0 or self.balance <= 0:
+            return Decimal('0.00')
+        return (self.balance / self.target * 100).quantize(Decimal('0.01'))
 
     def set_target_date(self, date: datetime | None) -> None:
         self.target_date = date
-        self.time_remaining = self._compute_time_remaining()
-        self.on_track, self.required_recurring_transfer = self._on_track_for_target()
-
-    def _compute_time_remaining(self) -> relativedelta.relativedelta | None:
-        if self.target_date is None:
-            return None
-
-        today = datetime.today()
-        return relativedelta.relativedelta(self.target_date.replace(tzinfo=None),
-                                           today.replace(tzinfo=None))
 
     def target_date_as_str(self) -> str:
         if self.target_date is None:
@@ -64,13 +78,18 @@ class Fund:
         return self.target_date.strftime('%m/%d/%Y')
 
     def time_remaining_as_str(self) -> str:
-        if self.time_remaining is None:
+        if self.target_date is None:
             return 'N/A'
+        if self.target_date.date() < datetime.today().date():
+            return 'Target date passed'
 
+        remaining = self.time_remaining
+        if remaining is None:
+            return 'N/A'
         time_units = (
-            ('years', self.time_remaining.years),
-            ('months', self.time_remaining.months),
-            ('days', self.time_remaining.days),
+            ('years', remaining.years),
+            ('months', remaining.months),
+            ('days', remaining.days),
         )
         time_remaining_str = ', '.join(
             f'{value} {label}' for label, value in time_units if value != 0
@@ -78,34 +97,38 @@ class Fund:
 
         if time_remaining_str:
             return time_remaining_str + ' remaining'
-        else:
-            return 'No time remaining'
+        return 'No time remaining'
 
-    def set_recurring_transfer(self, recurring_transfer: float) -> None:
-        self.recurring_transfer = recurring_transfer
-        self.on_track, self.required_recurring_transfer = self._on_track_for_target()
+    def set_recurring_transfer(self, recurring_transfer) -> None:
+        self.recurring_transfer = parse_money(recurring_transfer)
 
-    def _on_track_for_target(self) -> tuple[bool | None, float | None]:
-        if self.time_remaining is None:
+    def _on_track_for_target(self) -> tuple[bool | None, Decimal | None]:
+        if self.target_date is None:
             return None, None
 
-        # Calculate our remaining balance
         remaining_balance = self.target - self.balance
+        if remaining_balance < 0:
+            remaining_balance = Decimal('0.00')
 
-        # Calculate how many months are remaining to contribute to this fund
-        months_remaining = (self.time_remaining.years * 12) + self.time_remaining.months
+        today = datetime.today()
+        if self.target_date.date() <= today.date():
+            return remaining_balance <= 0, remaining_balance
 
-        # If we don't have any months left, check to see if we currently have enough money
-        if months_remaining == 0:
-            if remaining_balance > 0:
-                return False, remaining_balance
-            else:
-                return True, 0
-        # Otherwise, check to see if our recurring transfer is high enough to meet the target
-        else:
-            required_recurring_transfer = remaining_balance / months_remaining
-            on_track = self.recurring_transfer >= required_recurring_transfer
-            return on_track, required_recurring_transfer
+        remaining = self.time_remaining
+        if remaining is None:
+            return remaining_balance <= 0, remaining_balance
+        months_remaining = (remaining.years * 12) + remaining.months
+        if months_remaining <= 0:
+            # Less than a full month remains, so the remaining balance is due now.
+            return remaining_balance <= 0, remaining_balance
+
+        required_recurring_transfer = (remaining_balance / months_remaining).quantize(
+            Decimal('0.01')
+        )
+        return (
+            self.recurring_transfer >= required_recurring_transfer,
+            required_recurring_transfer,
+        )
 
     def get_on_track_status_as_str(self) -> str:
         match self.on_track:
@@ -114,5 +137,7 @@ class Fund:
             case True:
                 return 'On track to meet target'
             case False:
-                return f'Contribute {money_format(self.required_recurring_transfer)} / month ' \
-                        'to meet target'
+                return (
+                    f'Contribute {money_format(self.required_recurring_transfer)} / month '
+                    'to meet target'
+                )

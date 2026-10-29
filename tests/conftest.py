@@ -1,53 +1,39 @@
-"""Flet test app fixture with isolated local data and no remote server access."""
+"""Headless UI test fixture with isolated local data and no remote server access."""
 
-import asyncio
-import os
 import json
-from pathlib import Path
-import shutil
-import sys
+import os
+import tempfile
+from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
-from flet.testing import FletTestApp
+from ui_helpers import FakePage
+
+# Importing data/nextcloud creates their data directory. Keep the test suite
+# away from the real platform user-data location.
+os.environ.setdefault(
+    'FLET_APP_STORAGE_DATA', tempfile.mkdtemp(prefix='savings-funds-tests-')
+)
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+@pytest.fixture(autouse=True)
+def no_os_keyring(monkeypatch):
+    """Keep tests deterministic when a desktop keyring is available."""
+    import keyring
 
+    import nextcloud
 
-def configure_host_mode_flutter_test(flutter_app_dir):
-    """Match the generated Flutter driver to the Python-hosted test app."""
-    flutter_dir = Path(flutter_app_dir)
-    main_path = flutter_dir / 'lib' / 'main.dart'
-    main_source = main_path.read_text(encoding='utf-8')
+    def unavailable(*_args, **_kwargs):
+        raise keyring.errors.NoKeyringError('test keyring disabled')
 
-    if 'Tester? tester;' not in main_source:
-        main_source = main_source.replace(
-            'String outLogFilename = "";',
-            'String outLogFilename = "";\nTester? tester;',
-        )
-        main_source = main_source.replace(
-            'return FletApp(\n', 'return FletApp(\n      tester: tester,\n'
-        )
-        main_path.write_text(main_source, encoding='utf-8')
-
-    test_driver = flutter_dir / 'integration_test' / 'app_test.dart'
-    test_driver.write_text(
-        """import 'package:flet_integration_test/flet_integration_test.dart';
-import 'package:savings_funds/main.dart' as app;
-
-void main() => runFletHostTest(
-      appMain: app.main,
-      assignTester: (tester) => app.tester = tester,
-    );
-""",
-        encoding='utf-8',
-    )
+    monkeypatch.setattr(nextcloud.keyring, 'get_password', unavailable)
+    monkeypatch.setattr(nextcloud.keyring, 'set_password', unavailable)
+    monkeypatch.setattr(nextcloud.keyring, 'delete_password', unavailable)
 
 
 @pytest_asyncio.fixture
-async def flet_app(tmp_path, monkeypatch, request):
-    """Run the real app in Flet's host-mode tester against temporary files."""
+async def headless_app(tmp_path, monkeypatch, request):
+    """Run the real app and Flet control tree without a Flutter host."""
     import app as app_module
     import data
     import nextcloud
@@ -56,24 +42,31 @@ async def flet_app(tmp_path, monkeypatch, request):
     balance_path = tmp_path / 'balance.txt'
     funds_path = tmp_path / 'funds.json'
     budget_path = tmp_path / 'budget.json'
+    history_path = tmp_path / 'budget_history.json'
     config_path = tmp_path / 'nextcloud_sync.json'
+    sync_state_path = tmp_path / 'sync_state.json'
 
     # These tests exercise the shipped UI and app callbacks while keeping all
     # persistence inside pytest's temporary directory.
     monkeypatch.setattr(data, 'ACCOUNT_BALANCE_FILE', balance_path)
     monkeypatch.setattr(data, 'FUNDS_FILE', funds_path)
     monkeypatch.setattr(data, 'BUDGET_FILE', budget_path)
+    monkeypatch.setattr(data, 'BUDGET_HISTORY_FILE', history_path)
     monkeypatch.setattr(nextcloud, 'ACCOUNT_BALANCE_FILE', balance_path)
     monkeypatch.setattr(nextcloud, 'FUNDS_FILE', funds_path)
     monkeypatch.setattr(nextcloud, 'BUDGET_FILE', budget_path)
+    monkeypatch.setattr(nextcloud, 'BUDGET_HISTORY_FILE', history_path)
     monkeypatch.setattr(nextcloud, 'NEXTCLOUD_DATA_FILE', config_path)
+    monkeypatch.setattr(nextcloud, 'SYNC_STATE_FILE', sync_state_path)
     monkeypatch.setattr(app_module, 'ACCOUNT_BALANCE_FILE', balance_path)
     monkeypatch.setattr(app_module, 'FUNDS_FILE', funds_path)
     monkeypatch.setattr(app_module, 'BUDGET_FILE', budget_path)
+    monkeypatch.setattr(app_module, 'BUDGET_HISTORY_FILE', history_path)
     monkeypatch.setattr(app_module, 'NEXTCLOUD_DATA_FILE', config_path)
     monkeypatch.setattr(settings_ui, 'ping_nextcloud_server', lambda _data: (True, ''))
 
-    if request.node.get_closest_marker('first_run') is None:
+    first_run = request.node.get_closest_marker('first_run') is not None
+    if not first_run:
         config_path.write_text('{}', encoding='utf-8')
         balance_path.write_text('5000', encoding='utf-8')
         seed_funds = request.node.get_closest_marker('seed_funds')
@@ -82,60 +75,25 @@ async def flet_app(tmp_path, monkeypatch, request):
         )
         budget_path.write_text('[]', encoding='utf-8')
 
-    flutter_app_dir = os.environ.get('FLET_TEST_FLUTTER_APP_DIR')
-    if not flutter_app_dir:
-        pytest.fail('Run the Flet integration suite with `uv run flet test`.')
+    page = FakePage()
+    app = app_module.SavingsFundsApp(page)
+    sync_requests = []
+    app._sync_file_in_background = sync_requests.append
 
-    # flet test defaults to device mode. Host mode lets this fixture inject
-    # temporary file paths and replace the remote ping before the UI launches.
-    monkeypatch.setenv('FLET_TEST_DEVICE_MODE', '0')
-    configure_host_mode_flutter_test(flutter_app_dir)
-    if sys.platform.startswith('linux') and not shutil.which('clang++'):
-        available_cxx = shutil.which('g++')
-        if available_cxx:
-            compiler_bin = tmp_path / 'compiler-bin'
-            compiler_bin.mkdir()
-            (compiler_bin / 'clang++').symlink_to(available_cxx)
-            monkeypatch.setenv(
-                'PATH', str(compiler_bin) + os.pathsep + os.environ.get('PATH', '')
-            )
-    state = {}
+    if not first_run:
+        await app.perform_nextcloud_sync()
+        app.load_account_balance_and_funds()
 
-    async def test_main(page):
-        app = app_module.SavingsFundsApp(page)
-        state['sync_requests'] = []
-        app._sync_file_in_background = state['sync_requests'].append
-        state['app'] = app
-
-        async def bootstrap():
-            await app.perform_nextcloud_sync()
-            app.load_account_balance_and_funds()
-
-        state['bootstrap_task'] = asyncio.create_task(bootstrap())
-
-    test_app = FletTestApp(
-        flutter_app_dir=flutter_app_dir,
-        flet_app_main=test_main,
-        assets_dir=PROJECT_ROOT / 'src' / 'assets',
-        test_path=str(request.fspath),
-        device_mode=False,
+    yield SimpleNamespace(
+        app=app,
+        page=page,
+        paths={
+            'balance': balance_path,
+            'funds': funds_path,
+            'budget': budget_path,
+            'history': history_path,
+            'nextcloud': config_path,
+            'sync_state': sync_state_path,
+        },
+        sync_requests=sync_requests,
     )
-    test_app.paths = {
-        'balance': balance_path,
-        'funds': funds_path,
-        'budget': budget_path,
-        'nextcloud': config_path,
-    }
-    test_app.app_state = state
-    try:
-        await test_app.start()
-        yield test_app
-    finally:
-        bootstrap_task = state.get('bootstrap_task')
-        if bootstrap_task is not None and not bootstrap_task.done():
-            bootstrap_task.cancel()
-            try:
-                await bootstrap_task
-            except asyncio.CancelledError:
-                pass
-        await test_app.teardown()

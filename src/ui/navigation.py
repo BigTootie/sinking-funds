@@ -14,10 +14,16 @@ class AppPageNavigation:
         self.selected_index = 0  # Page controls are ordered Savings, Budget.
         self.page_view = ft.Stack(
             controls=[
-                ft.Container(content=pages[i], visible=(i == self.selected_index), expand=True,
-                             key=f'app-page-{i}')
+                ft.Container(
+                    content=pages[i],
+                    visible=(i == self.selected_index),
+                    expand=True,
+                    key=f'app-page-{i}',
+                )
                 for i in range(len(pages))
-            ], expand=True, key='app-page-view',
+            ],
+            expand=True,
+            key='app-page-view',
         )
         self.navigation_bar = ft.NavigationBar(
             destinations=[

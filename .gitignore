@@ -5,7 +5,7 @@ __pycache__/
 *.egg-info/
 build/
 dist/
-uv.lock
+.ruff_cache/
 
 # Test output
 .pytest_cache/
@@ -18,3 +18,8 @@ nextcloud_sync.json
 balance.txt
 funds.json
 budget.json
+budget_history.json
+sync_state.json
+backups/
+*.corrupt-*
+*.remote-*.conflict
