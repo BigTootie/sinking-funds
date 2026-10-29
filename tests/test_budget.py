@@ -223,3 +223,16 @@ def test_savings_page_uses_one_page_level_scroller():
     assert savings.fund_list.list_view.expand is None
     assert savings.fund_list.list_view.scroll.value == 'hidden'
     assert savings.fund_list.list_view.height == 140
+
+
+def test_fund_budget_row_shows_remaining_to_goal():
+    fund = Fund('Car', 600, 100, recurring_transfer=50)
+    categories = []
+    sync_recurring_fund_expenses(categories, [fund])
+    dashboard = BudgetDashboard(
+        SimpleNamespace(width=800), categories, lambda: None, funds=[fund]
+    )
+
+    row = dashboard.cards[0]
+    assert row.planned.value == '$50.00'
+    assert row.remaining.value == '$500.00 to goal'

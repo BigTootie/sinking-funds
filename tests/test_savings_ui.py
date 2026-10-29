@@ -122,7 +122,7 @@ async def test_account_balance_can_be_modified(headless_app):
     await enter(page, 'account-balance-input', '7500')
     await click(page, 'account-balance-save')
 
-    assert len(find_by_text(page, '$7,500.00')) == 1
+    assert len(find_by_text(page, '$7,500.00')) >= 1
     assert headless_app.paths['balance'].read_text(encoding='utf-8') == '7500.00'
 
 

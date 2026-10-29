@@ -155,6 +155,27 @@ class Ledger:
                 'INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)',
                 ('schema_version', str(SCHEMA_VERSION)),
             )
+            migrated_default = connection.execute(
+                'SELECT 1 FROM meta WHERE key = ?', ('default_account_migrated',)
+            ).fetchone()
+            if migrated_default is None:
+                accounts = connection.execute(
+                    'SELECT id, name, type FROM accounts'
+                ).fetchall()
+                if (
+                    len(accounts) == 1
+                    and accounts[0]['name'] == 'Checking'
+                    and accounts[0]['type'] == 'checking'
+                ):
+                    connection.execute(
+                        "UPDATE accounts SET name = 'Savings', type = 'savings' "
+                        'WHERE id = ?',
+                        (accounts[0]['id'],),
+                    )
+                connection.execute(
+                    'INSERT INTO meta(key, value) VALUES (?, ?)',
+                    ('default_account_migrated', '1'),
+                )
 
     def get_meta(self, key: str, default: str | None = None) -> str | None:
         with self._connect() as connection:
@@ -190,7 +211,7 @@ class Ledger:
                     'INSERT INTO accounts '
                     '(id, name, type, currency, opening_balance_minor, archived, created_at) '
                     'VALUES (?, ?, ?, ?, 0, 0, ?)',
-                    (account_id, 'Checking', 'checking', 'USD', _now()),
+                    (account_id, 'Savings', 'savings', 'USD', _now()),
                 )
                 if balance:
                     connection.execute(

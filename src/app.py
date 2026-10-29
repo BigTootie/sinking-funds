@@ -517,6 +517,7 @@ class SavingsFundsApp:
             lambda: save_balance_to_txt(self.account_balance), 'balance.txt'
         ):
             self._sync_file_in_background(ACCOUNT_BALANCE_FILE)
+        self._refresh_ledger_view()
 
     def _on_ledger_changed(self):
         self.account_balance = self.ledger.total_balance()
@@ -525,6 +526,11 @@ class SavingsFundsApp:
         ):
             self._sync_file_in_background(ACCOUNT_BALANCE_FILE)
         self.refresh_page()
+        self._refresh_ledger_view()
+
+    def _refresh_ledger_view(self):
+        if self.transactions_dashboard is not None:
+            self.transactions_dashboard.refresh()
 
     def set_theme_mode(self, mode):
         if mode not in {'dark', 'light'}:
@@ -552,6 +558,7 @@ class SavingsFundsApp:
             self._on_budget_categories_changed,
             self.budget_state.period,
             self._reset_budget_month,
+            self.funds,
         )
         self.transactions_dashboard = TransactionsDashboard(
             self.page, self.ledger, self._on_ledger_changed

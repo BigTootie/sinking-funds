@@ -12,6 +12,7 @@ from budget import (
     format_period,
     reorder_budget_categories,
 )
+from fund import Fund
 from ui.shared import AmountAdjustmentDialog, ConfirmDialog, MessageDialog, dialog_form
 from utils import money_format, parse_money, parse_signed_money
 
@@ -238,11 +239,13 @@ class BudgetRow:
         dialog: BudgetCategoryDialog,
         adjustment_dialog: AmountAdjustmentDialog,
         on_changed: Callable[[], None],
+        fund: Fund | None = None,
     ):
         self.category = category
         self.dialog = dialog
         self.adjustment_dialog = adjustment_dialog
         self.on_changed = on_changed
+        self.fund = fund
         self.name = ft.Text(size=15, weight=ft.FontWeight.W_500, expand=True)
         self.planned = ft.Text(size=14, width=110, text_align=ft.TextAlign.RIGHT)
         self.remaining = ft.Text(
@@ -305,7 +308,13 @@ class BudgetRow:
     def refresh(self):
         self.name.value = self.category.name
         self.planned.value = money_format(self.category.budgeted)
-        if self.category.kind == 'income':
+        if self.fund is not None and self.fund.target > 0:
+            goal_remaining = max(self.fund.target - self.fund.balance, Decimal('0'))
+            self.remaining.value = f'{money_format(goal_remaining)} to goal'
+            self.remaining.color = (
+                colors.GREEN if goal_remaining == 0 else colors.TEXT_SECONDARY
+            )
+        elif self.category.kind == 'income':
             remaining = self.category.budgeted - self.category.spent
             if remaining < 0:
                 self.remaining.value = f'{money_format(abs(remaining))} above plan'
@@ -330,9 +339,11 @@ class BudgetDashboard:
         on_categories_changed: Callable[[], None],
         period: str | None = None,
         on_reset_month: Callable[[], None] | None = None,
+        funds: list[Fund] | None = None,
     ):
         self.page = page
         self.categories = categories
+        self.funds = funds or []
         self.on_categories_changed = on_categories_changed
         self.period = period or current_period()
         self.on_reset_month = on_reset_month
@@ -490,8 +501,15 @@ class BudgetDashboard:
 
     def refresh(self):
         self.summary.refresh(self.categories, self.period)
+        funds_by_id = {fund.id: fund for fund in self.funds}
         self.rows = [
-            BudgetRow(c, self.dialog, self.adjustment_dialog, self._categories_changed)
+            BudgetRow(
+                c,
+                self.dialog,
+                self.adjustment_dialog,
+                self._categories_changed,
+                funds_by_id.get(c.source_fund_id),
+            )
             for c in self.categories
         ]
         self.cards = self.rows

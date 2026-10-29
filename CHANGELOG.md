@@ -26,6 +26,11 @@
 - Improve the savings page styling through the shared semantic theme.
 - Calculate “left to budget” from planned income minus planned expenses so
   planned-only rows update both the top banner and summary panel.
+- Refresh the transaction register immediately after savings-balance changes.
+- Treat the migrated default account as a Savings account instead of Checking.
+- Show fund budget rows with the remaining amount needed to reach the fund goal
+  instead of the confusing planned-vs-spent difference.
+- Lighten the dark theme to a neutral grey palette with blue accents.
 
 ### Quality
 

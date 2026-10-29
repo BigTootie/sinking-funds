@@ -111,6 +111,10 @@ def test_legacy_seed_is_idempotent_and_preserves_totals(tmp_path):
     ledger.seed_legacy(Decimal('999'), [], [], '2026-10')
 
     assert ledger.total_balance() == Decimal('500.00')
+    account = ledger.default_account()
+    assert (
+        account is not None and account.name == 'Savings' and account.type == 'savings'
+    )
     with ledger._connect() as connection:
         assert connection.execute('SELECT COUNT(*) FROM funds').fetchone()[0] == 1
         assert (

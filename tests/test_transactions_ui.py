@@ -106,3 +106,13 @@ async def test_ledger_json_import_restores_accounts_and_transactions(headless_ap
 
     assert app.ledger.total_balance() == 5000
     assert app.ledger.list_transactions(search='Temporary') == []
+
+
+async def test_savings_balance_change_refreshes_the_register(headless_app):
+    app = headless_app.app
+    page = headless_app.page
+
+    app.set_account_balance(Decimal('5500.00'))
+
+    assert app.ledger.total_balance() == Decimal('5500.00')
+    assert len(find_by_text(page, 'Balance adjustment')) == 1
