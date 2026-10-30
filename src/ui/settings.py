@@ -9,11 +9,13 @@ import flet as ft
 import colors
 from data import DataFileError
 from nextcloud import (
-    load_nextcloud_sync_data,
+    SyncError,
+    load_nextcloud_sync_data_from_db,
     normalize_base_url,
     ping_nextcloud_server,
-    save_nextcloud_sync_data,
+    save_nextcloud_sync_data_to_db,
 )
+from sync.crypto import new_recovery_key
 from ui.shared import ConfirmDialog, MessageDialog, dialog_form
 
 
@@ -76,8 +78,8 @@ class NextcloudConfigDialog:
     ):
         self.page = page
         self.on_saved = on_saved
-        self.load_settings = load_settings or load_nextcloud_sync_data
-        self.save_settings = save_settings or save_nextcloud_sync_data
+        self.load_settings = load_settings or load_nextcloud_sync_data_from_db
+        self.save_settings = save_settings or save_nextcloud_sync_data_to_db
 
     def add(self, on_complete: asyncio.Event):
         self._open(
@@ -87,14 +89,17 @@ class NextcloudConfigDialog:
     def modify(self):
         try:
             initial = self.load_settings() or {}
-        except (DataFileError, OSError) as exc:
+        except (DataFileError, OSError, SyncError) as exc:
             MessageDialog(self.page, 'Nextcloud settings', str(exc)).open()
             initial = {}
         self._open(initial, 'Modify Nextcloud config')
 
     def _persist(self, document: dict | None, error: ft.Text) -> bool:
         try:
-            self.save_settings(document)
+            if self.save_settings(document) is False:
+                error.value = 'Could not save Nextcloud settings.'
+                self.page.update()
+                return False
         except OSError as exc:
             error.value = f'Could not save Nextcloud settings: {exc}'
             self.page.update()
@@ -124,6 +129,47 @@ class NextcloudConfigDialog:
             value=initial.get('data_path', ''),
             key='nextcloud-path-input',
         )
+        encrypted_switch = ft.Switch(
+            label='Encrypt synced data',
+            value=bool(initial.get('encrypted')),
+            key='nextcloud-encryption-switch',
+        )
+        passphrase_input = ft.TextField(
+            label='Sync passphrase or recovery key',
+            value='',
+            password=True,
+            can_reveal_password=True,
+            key='nextcloud-passphrase-input',
+            visible=bool(initial.get('encrypted')),
+        )
+        encryption_hint = ft.Text(
+            'Use the same passphrase on every device. Keep it safe: losing it '
+            'means encrypted remote data cannot be recovered.',
+            size=11,
+            color=colors.TEXT_SECONDARY,
+            visible=bool(initial.get('encrypted')),
+        )
+
+        def generate_key(e):
+            passphrase_input.value = new_recovery_key()
+            passphrase_input.password = False
+            self.page.update()
+
+        generate_key_button = ft.TextButton(
+            'Generate key',
+            key='nextcloud-generate-key',
+            on_click=generate_key,
+            visible=bool(initial.get('encrypted')),
+        )
+
+        def toggle_encryption(e):
+            visible = bool(encrypted_switch.value)
+            passphrase_input.visible = visible
+            encryption_hint.visible = visible
+            generate_key_button.visible = visible
+            self.page.update()
+
+        encrypted_switch.on_change = toggle_encryption
         error = ft.Text(color=colors.RED)
 
         def skip(e):
@@ -148,12 +194,24 @@ class NextcloudConfigDialog:
                 self.page.update()
                 return
 
+            if (
+                encrypted_switch.value
+                and not initial.get('encrypted')
+                and not (passphrase_input.value or '').strip()
+            ):
+                error.value = 'Enter a sync passphrase to enable encryption.'
+                self.page.update()
+                return
             data = {
                 'base_url': base_url,
                 'username': (username_input.value or '').strip(),
                 'password': password_input.value or '',
                 'data_path': data_path,
+                'encrypted': bool(encrypted_switch.value),
+                'kdf_salt': initial.get('kdf_salt'),
             }
+            if passphrase_input.value:
+                data['passphrase'] = passphrase_input.value
             success, error_message = await asyncio.to_thread(
                 ping_nextcloud_server, data
             )
@@ -194,8 +252,17 @@ class NextcloudConfigDialog:
         self.control = ft.AlertDialog(
             title=title,
             content=dialog_form(
-                [url_input, username_input, password_input, data_path_input, error],
-                height=320,
+                [
+                    url_input,
+                    username_input,
+                    password_input,
+                    data_path_input,
+                    encrypted_switch,
+                    ft.Row([passphrase_input, generate_key_button]),
+                    encryption_hint,
+                    error,
+                ],
+                height=470,
             ),
             actions=actions,
             on_dismiss=(
@@ -222,6 +289,7 @@ class SettingsView:
         on_open_data_folder: Callable[[], None] | None = None,
         theme_mode: str = 'dark',
         on_theme_change: Callable[[str], None] | None = None,
+        on_show_conflicts: Callable[[], None] | None = None,
     ):
         self.page = page
         self.nextcloud_dialog = nextcloud_dialog
@@ -232,6 +300,7 @@ class SettingsView:
         self.on_restore = on_restore
         self.on_open_data_folder = on_open_data_folder
         self.on_theme_change = on_theme_change
+        self.on_show_conflicts = on_show_conflicts
         self.theme_switch = ft.Switch(
             label='Light mode',
             value=theme_mode == 'light',
@@ -284,9 +353,25 @@ class SettingsView:
             key='disable-nextcloud-button',
             on_click=self._confirm_disable_sync,
         )
+        self.conflicts_button = ft.TextButton(
+            'Review conflicts',
+            icon=ft.Icons.WARNING_AMBER_OUTLINED,
+            key='sync-conflicts-button',
+            on_click=lambda e: (
+                self.on_show_conflicts() if self.on_show_conflicts else None
+            ),
+        )
+        self.sync_status_text = ft.Text(
+            'Sync runs automatically after local changes.',
+            size=12,
+            color=colors.TEXT_SECONDARY,
+            key='sync-status-text',
+        )
         nextcloud_actions: list[ft.Control] = []
         if self.on_manual_sync is not None:
             nextcloud_actions.append(self.manual_sync_button)
+        if self.on_show_conflicts is not None:
+            nextcloud_actions.append(self.conflicts_button)
         if self.on_disable_sync is not None:
             nextcloud_actions.append(self.disable_sync_button)
         self.nextcloud_card = ft.Container(
@@ -317,6 +402,7 @@ class SettingsView:
                                             size=12,
                                             color=colors.TEXT_SECONDARY,
                                         ),
+                                        self.sync_status_text,
                                     ],
                                     spacing=2,
                                     expand=True,
@@ -464,6 +550,11 @@ class SettingsView:
             self.on_disable_sync,
             confirm_label='Disable',
         ).open()
+
+    def set_sync_status(self, message: str, *, error: bool = False):
+        self.sync_status_text.value = message
+        self.sync_status_text.color = colors.RED if error else colors.TEXT_SECONDARY
+        self.page.update()
 
     def show(self):
         self.control.visible = True

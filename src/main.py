@@ -2,8 +2,7 @@ import flet as ft
 
 
 async def main(page: ft.Page):
-    # Resolve and migrate durable storage before importing modules that bind
-    # data file paths at import time.
+    # Resolve durable storage before importing modules that bind paths.
     import paths
 
     paths.initialize_data_storage()

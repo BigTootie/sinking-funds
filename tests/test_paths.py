@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import paths
 
 
@@ -42,42 +40,9 @@ def test_open_data_folder_uses_platform_file_manager(monkeypatch, tmp_path):
     ]
 
 
-def test_legacy_files_are_migrated_without_overwriting(tmp_path):
-    legacy = tmp_path / 'legacy'
+def test_initialization_creates_storage_without_any_data_files(tmp_path):
     destination = tmp_path / 'data'
-    legacy.mkdir()
-    destination.mkdir()
-    (legacy / 'funds.json').write_text('legacy funds', encoding='utf-8')
-    (legacy / 'budget_history.json').write_text('legacy history', encoding='utf-8')
-    (legacy / 'balance.txt').write_text('legacy balance', encoding='utf-8')
-    (destination / 'balance.txt').write_text('current balance', encoding='utf-8')
 
-    migrated = paths.initialize_data_storage(destination, legacy)
-
-    assert {path.name for path in migrated} == {'funds.json', 'budget_history.json'}
-    assert (destination / 'funds.json').read_text(encoding='utf-8') == 'legacy funds'
-    assert (destination / 'balance.txt').read_text(
-        encoding='utf-8'
-    ) == 'current balance'
-
-
-def test_legacy_migration_runs_only_once(tmp_path):
-    legacy = tmp_path / 'legacy'
-    destination = tmp_path / 'data'
-    legacy.mkdir()
-    destination.mkdir()
-    (legacy / 'funds.json').write_text('first legacy copy', encoding='utf-8')
-
-    assert paths.initialize_data_storage(destination, legacy)
-    (destination / 'funds.json').unlink()
-    (legacy / 'funds.json').write_text('changed legacy copy', encoding='utf-8')
-
-    assert paths.initialize_data_storage(destination, legacy) == []
-    assert not (destination / 'funds.json').exists()
-
-
-def test_no_migration_when_data_directory_is_project_root(tmp_path):
-    (tmp_path / 'funds.json').write_text('[]', encoding='utf-8')
-
-    assert paths.initialize_data_storage(tmp_path, tmp_path) == []
-    assert Path(tmp_path / 'funds.json').exists()
+    assert paths.initialize_data_storage(destination) is None
+    assert destination.is_dir()
+    assert list(destination.iterdir()) == []

@@ -1,5 +1,6 @@
 """Helpers for driving the app's real Flet controls without a Flutter host."""
 
+import asyncio
 import inspect
 from types import SimpleNamespace
 
@@ -34,6 +35,9 @@ class FakePage:
     def pop_dialog(self):
         if self.dialogs:
             self.dialogs.pop()
+
+    def run_task(self, handler, *args, **kwargs):
+        return asyncio.create_task(handler(*args, **kwargs))
 
 
 def _walk(value, seen):

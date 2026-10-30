@@ -7,7 +7,6 @@ from types import SimpleNamespace
 import flet as ft
 from ui_helpers import click, enter, find_by_key, visible_page
 
-import app as app_module
 import ui.settings as settings_ui
 
 
@@ -15,7 +14,7 @@ def test_nextcloud_settings_write_failure_is_reported(monkeypatch):
     def fail_to_save(_document):
         raise OSError('read-only filesystem')
 
-    monkeypatch.setattr(settings_ui, 'save_nextcloud_sync_data', fail_to_save)
+    monkeypatch.setattr(settings_ui, 'save_nextcloud_sync_data_to_db', fail_to_save)
     dialog = settings_ui.NextcloudConfigDialog(
         SimpleNamespace(update=lambda: None), lambda _data: None
     )
@@ -40,7 +39,7 @@ def test_nextcloud_dialog_uses_finite_form():
     form = dialogs[0].content
     assert isinstance(form, ft.ListView)
     assert form.width == 320
-    assert form.height == 320
+    assert form.height == 470
 
 
 async def test_settings_can_modify_nextcloud_configuration(headless_app):
@@ -58,16 +57,11 @@ async def test_settings_can_modify_nextcloud_configuration(headless_app):
     await click(page, 'nextcloud-save-button')
 
     stored = json.loads(app.ledger.get_setting('nextcloud_config'))
-    assert stored == {
-        'base_url': 'cloud.example.test',
-        'username': 'test-user',
-        'data_path': 'Savings',
-    }
+    assert stored['base_url'] == 'cloud.example.test'
+    assert stored['username'] == 'test-user'
+    assert stored['data_path'] == 'Savings'
     assert 'test-password' not in app.ledger.get_setting('nextcloud_config')
-    assert app.nextcloud_sync_data == {
-        **stored,
-        'password': 'test-password',
-    }
+    assert app.nextcloud_sync_data['password'] == 'test-password'
     assert any(
         isinstance(dialog, ft.SnackBar)
         and 'keyring is unavailable' in dialog.content.value
@@ -115,7 +109,7 @@ def test_settings_data_buttons_invoke_backup_and_export_callbacks():
     assert calls == ['backup', 'export', 'restore', 'open']
 
 
-async def test_nextcloud_card_offers_manual_sync(headless_app, monkeypatch):
+async def test_nextcloud_card_offers_manual_sync(headless_app):
     app = headless_app.app
     page = headless_app.page
     app.nextcloud_sync_data = {
@@ -124,14 +118,41 @@ async def test_nextcloud_card_offers_manual_sync(headless_app, monkeypatch):
         'password': 'test-password',
         'data_path': 'Savings',
     }
-    monkeypatch.setattr(app_module, 'ping_nextcloud_server', lambda _data: (True, ''))
+
+    class Engine:
+        def sync(self):
+            from sync.engine import SyncOutcome
+
+            return SyncOutcome(applied=1, last_sync='2026-10-30T12:00:00')
+
+    app.sync_engine = Engine()
 
     await click(page, 'settings-button')
     assert inspect.iscoroutinefunction(find_by_key(page, 'manual-sync-button').on_click)
     await click(page, 'manual-sync-button')
 
     assert any(
-        isinstance(dialog, ft.SnackBar)
-        and 'Nextcloud connection OK' in dialog.content.value
+        isinstance(dialog, ft.SnackBar) and 'Sync complete' in dialog.content.value
         for dialog in page.dialogs
     )
+
+
+def test_nextcloud_dialog_exposes_optional_encryption_and_key_generation():
+    page = SimpleNamespace(
+        show_dialog=lambda control: None,
+        pop_dialog=lambda: None,
+        update=lambda: None,
+    )
+    dialog = settings_ui.NextcloudConfigDialog(page, lambda _data: None)
+    dialog._open({}, 'Modify Nextcloud config')
+
+    switch = dialog.control.content.controls[4]
+    passphrase = dialog.control.content.controls[5].controls[0]
+    generate = dialog.control.content.controls[5].controls[1]
+    assert switch.key == 'nextcloud-encryption-switch'
+    assert passphrase.visible is False
+    switch.value = True
+    switch.on_change(None)
+    assert passphrase.visible is True
+    generate.on_click(None)
+    assert passphrase.value

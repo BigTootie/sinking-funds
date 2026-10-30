@@ -23,9 +23,11 @@ or web app. See [`CHANGELOG.md`](CHANGELOG.md) for release notes.
   after deletion.
 - Export ledger data as CSV or JSON and import a JSON ledger snapshot.
 - Switch between a blue-accented dark theme and a clean light theme in Settings.
-- Store Nextcloud connection settings and sync state locally. Multi-device
-  synchronization is deferred to v0.5 while the operation-log sync protocol is
-  built; v0.4 never reads or writes remote files.
+- Synchronize accounts, transactions, funds, budgets, history, and
+  contributions across devices through app-managed operation logs and snapshots
+  on Nextcloud. The local database is never uploaded.
+- Keep Nextcloud credentials in the OS keyring and optionally encrypt synced
+  data end to end with a passphrase or recovery key.
 
 The bottom navigation opens Budget, Savings, and Transactions. The budget page
 uses a clean EveryDollar-inspired list with a right-side monthly summary. Fund
@@ -54,65 +56,69 @@ Nextcloud URL field expects a host name, such as `cloud.example.com`.
 ## Local data
 
 `flet run` and packaged builds provide a durable per-app data directory through
-`FLET_APP_STORAGE_DATA`. The app stores its files there. When that variable is
-not set, for example when running `python src/main.py` directly, the app uses
-the platform user-data directory (`platformdirs`) instead of the working
-directory. Settings includes an **Open data folder** action.
+`FLET_APP_STORAGE_DATA`. When that variable is not set, for example when running
+`python src/main.py` directly, the app uses the platform user-data directory
+(`platformdirs`). Settings includes an **Open data folder** action.
 
-On startup the app copies any legacy data files from the project root into the
-configured data directory once, when the destination file does not already
-exist. Existing data always wins; migration never overwrites it.
+**SQLite is the only runtime data store.** Accounts, transactions, funds,
+budget groups, per-month allocations, history, scheduled contributions,
+settings, Nextcloud configuration, sync cursors, conflicts, and the operation
+log all live in one `ledger.db` file. Money is stored as integer minor units
+(cents) and as `Decimal` in memory. Writes are transactional, WAL is enabled,
+and schema migrations are tracked in both `PRAGMA user_version` and a
+`migrations` table.
 
-**SQLite is the source of truth.** Accounts, transactions, funds, budget
-groups, per-month allocations, budget history, scheduled fund contributions,
-settings, Nextcloud configuration/state, and the operation-log foundation all
-live in one `ledger.db` file. Money is stored as integer minor units (cents) in
-SQLite and as `Decimal` in memory, so totals remain exact. Writes are
-transactional, WAL is enabled, and schema migrations are tracked in both
-`PRAGMA user_version` and a `migrations` table.
+The app does not read or migrate `balance.txt`, `funds.json`, `budget.json`,
+`budget_history.json`, `nextcloud_sync.json`, or `sync_state.json`. Those legacy
+files are not part of the v0.5 data model.
 
-JSON and text files are **not runtime storage**. They may be present only as:
+The only other local files are explicit user actions:
 
-- one-time migration sources (`balance.txt`, `funds.json`, `budget.json`,
-  `budget_history.json`, and a legacy `nextcloud_sync.json`);
-- explicit import/export formats such as ledger JSON/CSV and database backups
-  or exports.
+- `backups/database-*.db` for local recovery (the latest ten are retained);
+- `exports/savings-funds-*.db` for portable exports;
+- temporary SQLite `-wal` and `-shm` files while the database is open.
 
-After the first launch on v0.4, the app reads and writes only the database.
-Legacy files are left untouched rather than deleted.
-
-Backups use SQLite's consistent backup API and are written under `backups/` in
-the data directory. Export writes a portable `.db` snapshot. Damaged legacy
-files are still preserved as `*.corrupt-*` during migration instead of being
-silently replaced. Data files use private permissions where the platform
-supports them.
-
-The Nextcloud password is stored in the operating system keyring when one is
-available (Windows Credential Manager, macOS Keychain, or Linux Secret
-Service/KWallet). The connection URL, username, data path, and sync state are
-stored in SQLite; the password is never written to the database or logs. On
-systems without a keyring, the app keeps the non-secret settings but warns that
-the password cannot be saved until a keyring backend is available.
+The Nextcloud password and optional encryption key are stored in the operating
+system keyring (Windows Credential Manager, macOS Keychain, or Linux Secret
+Service/KWallet). No password or key is written to the database, JSON, logs, or
+Nextcloud.
 
 ## Synchronization
 
-v0.4 keeps the Nextcloud settings and sync-state storage in SQLite but **does
-not perform multi-device file synchronization**. The v0.3 whole-file WebDAV
-synchronizer is retired from the application flow because JSON files are no
-longer the runtime source of truth. The database includes an append-only
-`sync_ops` table and a per-device Lamport counter as the foundation for the v0.5
-operation-log protocol; v0.5 will add snapshots, replay, conflict resolution,
-and auto-post deduplication across devices. No live database file is ever
-uploaded to Nextcloud.
+v0.5 uses an operation-log protocol. Each device has a stable ID and writes an
+ordered, checksummed operation document. Synchronization runs automatically on
+startup and after local changes; Settings provides **Sync now** for manual
+retries and **Review conflicts** when concurrent edits need a decision.
 
-Local data remains fully usable offline. Disabling Nextcloud from Settings
-removes the saved connection settings and keyring password.
+Remote layout is deliberately small:
+
+- `sync-v1/manifest.json` — protocol and non-secret encryption metadata;
+- `sync-v1/devices/<device_id>/ops.jsonl` — that device's operation history;
+- `sync-v1/snapshots/<device_id>/snapshot.json` — a bootstrap snapshot.
+
+A new device loads a snapshot for its initial state, then applies later
+operations from other devices. Snapshots are overwritten as they advance, so a
+two-device setup normally uses one manifest, one operation file per device, and
+one snapshot per device. The live `ledger.db` is never uploaded.
+
+Concurrent edits to the same record are not silently merged. The incoming
+operation is held locally and the record remains at the local value until the
+user chooses **Keep local** or **Use remote**. Unrelated records continue to
+sync. Recurring fund contributions use the shared `(fund_id, period)` identity,
+so the same month is never posted twice across devices.
+
+If encryption is enabled, the user creates a passphrase or recovery key on the
+first device and enters it once on each additional device. The key is kept in
+the OS keyring so normal startups do not prompt again. Nextcloud stores
+operation and snapshot contents as ciphertext; the small protocol manifest is
+unencrypted metadata. Losing the passphrase/recovery key makes remote encrypted
+data unrecoverable; local data remains usable.
 
 ## Project structure
 
 - `src/app.py` coordinates startup, persistence, page composition, and sync.
 - `src/main.py` initializes durable storage before the data modules load.
-- `src/paths.py` resolves the data directory and migrates legacy files.
+- `src/paths.py` resolves the data directory.
 - `src/ui/savings.py` contains savings dialogs, cards, and the dashboard.
 - `src/ui/budget.py` contains budget dialogs, cards, and the dashboard.
 - `src/ui/settings.py` contains the header and Nextcloud settings screen.
@@ -123,10 +129,11 @@ removes the saved connection settings and keyring password.
 - `src/ledger.py` owns the single SQLite database: schema/migrations, accounts,
   transactions, funds, per-month budget allocations, history, settings,
   fund contributions, and the operation log.
-- `src/data.py` handles legacy JSON migration, import/export helpers, database
-  backups, and compatibility parsers.
-- `src/nextcloud.py` retains the legacy WebDAV implementation and provides
-  keyring-backed Nextcloud settings stored in SQLite.
+- `src/data.py` handles budget bridges, database backups, and portable exports.
+- `src/nextcloud.py` provides keyring-backed Nextcloud settings stored in
+  SQLite and connection checks.
+- `src/sync/` contains the operation protocol, encryption, WebDAV/local
+  providers, and the sync engine.
 - `src/colors.py` and `src/utils.py` contain shared presentation and money helpers.
 - `tests/` contains model, SQLite migration, budget/fund, ledger, startup, and
   headless UI tests.

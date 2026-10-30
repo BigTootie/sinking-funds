@@ -608,6 +608,24 @@ release target is native Flet packages for supported platforms. See
 
 **Goal:** multi-device without data loss.
 
+**v0.5.0 status (2026-10-30):**
+
+- [x] Operation log, per-device cursors, checksums, snapshots, replay, and
+  conflict blocking.
+- [x] Compact Nextcloud layout: manifest, one operation file per device, and one
+  snapshot per device.
+- [x] Automatic sync after startup/local changes, manual retry, and sync status.
+- [x] Conflicting edits remain local until the user chooses local or remote.
+- [x] Auto-post deduplication across devices and offline catch-up.
+- [x] Optional AES-GCM end-to-end encryption with keyring-backed passphrase or
+  recovery key.
+- [x] Local-folder provider, WebDAV retries/conditional writes, and adapter
+  tests.
+- [ ] E2E key rotation and recovery-key display flow remain future polish.
+- [ ] Encryption migration for an existing unencrypted sync folder remains a
+  documented limitation.
+
+
 - Op log + snapshots over WebDAV; device IDs; idempotent apply; tombstones;
   compaction.
 - Auto-post deduplication across devices and offline periods.

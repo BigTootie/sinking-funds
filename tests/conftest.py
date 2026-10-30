@@ -1,6 +1,5 @@
-"""Headless UI test fixture with isolated local data and no remote server access."""
+"""Headless UI test fixture with an isolated SQLite database and no network."""
 
-import json
 import os
 import tempfile
 from types import SimpleNamespace
@@ -9,8 +8,6 @@ import pytest
 import pytest_asyncio
 from ui_helpers import FakePage
 
-# Importing data/nextcloud creates their data directory. Keep the test suite
-# away from the real platform user-data location.
 os.environ.setdefault(
     'FLET_APP_STORAGE_DATA', tempfile.mkdtemp(prefix='savings-funds-tests-')
 )
@@ -31,67 +28,65 @@ def no_os_keyring(monkeypatch):
     monkeypatch.setattr(nextcloud.keyring, 'delete_password', unavailable)
 
 
+def _seed_funds(store, entries):
+    from datetime import datetime
+
+    from fund import Fund
+
+    funds = []
+    for entry in entries:
+        target_date = entry.get('target_date')
+        if target_date in (None, '', 'None'):
+            target_date = None
+        else:
+            target_date = datetime.strptime(target_date, '%m/%d/%Y')
+        funds.append(
+            Fund(
+                entry['name'],
+                entry['target'],
+                entry.get('balance', 0),
+                target_date=target_date,
+                recurring_transfer=entry.get('recurring_transfer', 0),
+                due_day=entry.get('due_day', 31),
+                kind=entry.get('kind', 'savings_goal'),
+                priority=entry.get('priority', 0),
+            )
+        )
+    store.replace_funds(funds)
+
+
 @pytest_asyncio.fixture
 async def headless_app(tmp_path, monkeypatch, request):
     """Run the real app and Flet control tree without a Flutter host."""
     import app as app_module
-    import data
     import ledger
-    import nextcloud
     import ui.settings as settings_ui
 
-    balance_path = tmp_path / 'balance.txt'
-    funds_path = tmp_path / 'funds.json'
-    budget_path = tmp_path / 'budget.json'
-    history_path = tmp_path / 'budget_history.json'
     ledger_path = tmp_path / 'ledger.db'
-    config_path = tmp_path / 'nextcloud_sync.json'
-    sync_state_path = tmp_path / 'sync_state.json'
-
-    # These tests exercise the shipped UI and app callbacks while keeping all
-    # persistence inside pytest's temporary directory.
-    monkeypatch.setattr(data, 'ACCOUNT_BALANCE_FILE', balance_path)
-    monkeypatch.setattr(data, 'FUNDS_FILE', funds_path)
-    monkeypatch.setattr(data, 'BUDGET_FILE', budget_path)
-    monkeypatch.setattr(data, 'BUDGET_HISTORY_FILE', history_path)
     monkeypatch.setattr(ledger, 'LEDGER_DB', ledger_path)
-    monkeypatch.setattr(nextcloud, 'ACCOUNT_BALANCE_FILE', balance_path)
-    monkeypatch.setattr(nextcloud, 'FUNDS_FILE', funds_path)
-    monkeypatch.setattr(nextcloud, 'BUDGET_FILE', budget_path)
-    monkeypatch.setattr(nextcloud, 'BUDGET_HISTORY_FILE', history_path)
-    monkeypatch.setattr(nextcloud, 'NEXTCLOUD_DATA_FILE', config_path)
-    monkeypatch.setattr(nextcloud, 'SYNC_STATE_FILE', sync_state_path)
     monkeypatch.setattr(settings_ui, 'ping_nextcloud_server', lambda _data: (True, ''))
 
     first_run = request.node.get_closest_marker('first_run') is not None
     if not first_run:
-        config_path.write_text('{}', encoding='utf-8')
-        balance_path.write_text('5000', encoding='utf-8')
+        store = ledger.Ledger(ledger_path)
+        store.set_meta('nextcloud_prompted', '1')
+        store.add_account('Savings', 'savings', '5000')
+        store.set_setting('account_balance_set', '1')
         seed_funds = request.node.get_closest_marker('seed_funds')
-        funds_path.write_text(
-            json.dumps(seed_funds.args[0] if seed_funds else []), encoding='utf-8'
-        )
-        budget_path.write_text('[]', encoding='utf-8')
+        if seed_funds is not None:
+            _seed_funds(store, seed_funds.args[0])
 
     page = FakePage()
     app = app_module.SavingsFundsApp(page)
-    sync_requests = []
-    app._sync_file_in_background = sync_requests.append
 
     if not first_run:
         await app.perform_nextcloud_sync()
         app.load_account_balance_and_funds()
+        # UI fixtures must never attempt a real WebDAV request.
+        app._sync_ready = False
 
     yield SimpleNamespace(
         app=app,
         page=page,
-        paths={
-            'balance': balance_path,
-            'funds': funds_path,
-            'budget': budget_path,
-            'history': history_path,
-            'nextcloud': config_path,
-            'sync_state': sync_state_path,
-        },
-        sync_requests=sync_requests,
+        paths={'ledger': ledger_path},
     )

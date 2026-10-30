@@ -1,23 +1,33 @@
-"""The single local SQLite database: ledger, funds, budget, and settings.
+"""The single local SQLite database: ledger, funds, budget, sync, and settings.
 
-Money is stored as integer minor units. SQLite is the runtime source of truth;
-JSON remains only a legacy migration and explicit import/export format.
+Money is stored as integer minor units. SQLite is the only runtime data store;
+JSON is used only for explicit user-requested import/export.
 """
 
 import csv
 import json
 import sqlite3
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
+from functools import wraps
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from paths import get_data_dir
+from sync.protocol import ProtocolError, verify
+from sync.state import (
+    SYNC_TABLES,
+    TABLES_BY_NAME,
+    diff_snapshots,
+    snapshot_tables,
+)
 
 LEDGER_DB = get_data_dir() / 'ledger.db'
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 class LedgerError(Exception):
@@ -48,6 +58,17 @@ def _date(value: date | datetime | str) -> str:
         return date.fromisoformat(value).isoformat()
     except (TypeError, ValueError):
         raise ValueError('date must be YYYY-MM-DD') from None
+
+
+def _sync_mutation(method):
+    """Capture all row changes made by a public ledger mutation."""
+
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        with self._sync_capture():
+            return method(self, *args, **kwargs)
+
+    return wrapped
 
 
 @dataclass
@@ -116,7 +137,38 @@ class Ledger:
     def __init__(self, path: Path | None = None):
         self.path = Path(path or LEDGER_DB)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.on_sync_op: Callable[[], None] | None = None
+        self._sync_logging = True
+        self._sync_depth = 0
         self._migrate()
+
+    @contextmanager
+    def _sync_capture(self):
+        """Record one operation containing all rows changed by a mutation."""
+        if not self._sync_logging:
+            yield
+            return
+        if self._sync_depth:
+            self._sync_depth += 1
+            try:
+                yield
+            finally:
+                self._sync_depth -= 1
+            return
+        self._sync_depth = 1
+        before = self.sync_snapshot()
+        completed = False
+        try:
+            yield
+            completed = True
+        finally:
+            self._sync_depth = 0
+        if not completed:
+            return
+        after = self.sync_snapshot()
+        changes = diff_snapshots(before, after)
+        if changes:
+            self._append_sync_operation(changes)
 
     @contextmanager
     def _connect(self):
@@ -259,14 +311,6 @@ class Ledger:
                     WHERE kind = 'recurring';
                 CREATE INDEX IF NOT EXISTS fund_contributions_period_idx
                     ON fund_contributions(period);
-                CREATE TABLE IF NOT EXISTS budget_imports (
-                    period TEXT NOT NULL,
-                    category_name TEXT NOT NULL,
-                    kind TEXT NOT NULL,
-                    budgeted_minor INTEGER NOT NULL,
-                    spent_minor INTEGER NOT NULL,
-                    PRIMARY KEY (period, category_name)
-                );
                 CREATE TABLE IF NOT EXISTS sync_state (
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL,
@@ -285,8 +329,23 @@ class Ledger:
                 );
                 CREATE INDEX IF NOT EXISTS sync_ops_lamport_idx
                     ON sync_ops(device_id, lamport);
+                CREATE UNIQUE INDEX IF NOT EXISTS sync_ops_device_lamport_idx
+                    ON sync_ops(device_id, lamport);
+                CREATE TABLE IF NOT EXISTS sync_conflicts (
+                    id TEXT PRIMARY KEY,
+                    op_id TEXT NOT NULL UNIQUE,
+                    device_id TEXT NOT NULL,
+                    lamport INTEGER NOT NULL,
+                    entity TEXT NOT NULL,
+                    entity_id TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    resolved_at TEXT,
+                    resolution TEXT
+                );
                 """
             )
+            connection.execute('DROP TABLE IF EXISTS budget_imports')
             # Additive migration for databases created by v0.3.
             for column, definition in (
                 ('budget_excluded', 'INTEGER NOT NULL DEFAULT 0'),
@@ -308,14 +367,12 @@ class Ledger:
                 self._ensure_column(connection, 'funds', column, definition)
 
             now = _now()
-            connection.execute(
-                'INSERT OR IGNORE INTO migrations(version, applied_at) VALUES (?, ?)',
-                (1, now),
-            )
-            connection.execute(
-                'INSERT OR IGNORE INTO migrations(version, applied_at) VALUES (?, ?)',
-                (SCHEMA_VERSION, now),
-            )
+            for version in range(1, SCHEMA_VERSION + 1):
+                connection.execute(
+                    'INSERT OR IGNORE INTO migrations(version, applied_at) '
+                    'VALUES (?, ?)',
+                    (version, now),
+                )
             connection.execute(f'PRAGMA user_version = {SCHEMA_VERSION}')
             connection.execute(
                 'INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)',
@@ -393,70 +450,6 @@ class Ledger:
                 (now,),
             )
 
-            budget_imports_migrated = connection.execute(
-                'SELECT 1 FROM meta WHERE key = ?',
-                ('budget_imports_v2_migrated',),
-            ).fetchone()
-            if budget_imports_migrated is None:
-                # Convert v0.3's JSON budget import rows into the v0.4 budget tables
-                # exactly once. This keeps existing installations' plans visible.
-                budget_rows = connection.execute(
-                    'SELECT period, category_name, kind, budgeted_minor, spent_minor '
-                    'FROM budget_imports ORDER BY period, rowid'
-                ).fetchall()
-                if budget_rows:
-                    group_id = connection.execute(
-                        'SELECT id FROM category_groups WHERE name = ? AND kind = ?',
-                        ('General', 'expense'),
-                    ).fetchone()
-                    if group_id is None:
-                        group_id = uuid4().hex
-                        connection.execute(
-                            'INSERT INTO category_groups '
-                            '(id, name, kind, sort_order, archived) VALUES (?, ?, ?, 0, 0)',
-                            (group_id, 'General', 'expense'),
-                        )
-                    else:
-                        group_id = group_id['id']
-                    for index, row in enumerate(budget_rows):
-                        category_id = connection.execute(
-                            'SELECT id FROM budget_categories WHERE name = ? AND kind = ?',
-                            (row['category_name'], row['kind']),
-                        ).fetchone()
-                        if category_id is None:
-                            category_id = uuid4().hex
-                            connection.execute(
-                                'INSERT INTO budget_categories '
-                                '(id, group_id, name, kind, rollover, archived, created_at) '
-                                'VALUES (?, ?, ?, ?, 0, 0, ?)',
-                                (
-                                    category_id,
-                                    group_id,
-                                    row['category_name'],
-                                    row['kind'],
-                                    now,
-                                ),
-                            )
-                        else:
-                            category_id = category_id['id']
-                        connection.execute(
-                            'INSERT OR IGNORE INTO budget_allocations '
-                            '(period, category_id, budgeted_minor, spent_minor, '
-                            'source_fund_id, sort_order) VALUES (?, ?, ?, ?, NULL, ?)',
-                            (
-                                row['period'],
-                                category_id,
-                                row['budgeted_minor'],
-                                row['spent_minor'],
-                                index,
-                            ),
-                        )
-
-                connection.execute(
-                    'INSERT INTO meta(key, value) VALUES (?, ?)',
-                    ('budget_imports_v2_migrated', '1'),
-                )
-
     def get_meta(self, key: str, default: str | None = None) -> str | None:
         with self._connect() as connection:
             row = connection.execute(
@@ -522,21 +515,30 @@ class Ledger:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def record_sync_op(
-        self,
-        entity: str,
-        entity_id: str,
-        operation: str,
-        payload: dict | None = None,
-    ) -> str:
-        """Append an operation to the local op log.
+    def sync_snapshot(self) -> dict[str, dict[str, dict]]:
+        with self._connect() as connection:
+            return snapshot_tables(connection)
 
-        v0.4 only records the log foundation; multi-device apply/merge arrives
-        with sync v2. The unique device/lamport pair makes the log replay-safe.
-        """
-        device_id = self.get_meta('device_id') or uuid4().hex
-        if self.get_meta('device_id') is None:
+    def is_empty(self) -> bool:
+        with self._connect() as connection:
+            for table in SYNC_TABLES:
+                if connection.execute(f'SELECT 1 FROM {table.name} LIMIT 1').fetchone():
+                    return False
+        return True
+
+    def _device_id(self) -> str:
+        device_id = self.get_meta('device_id')
+        if device_id is None:
+            device_id = uuid4().hex
             self.set_meta('device_id', device_id)
+        return device_id
+
+    def _append_sync_operation(
+        self, changes: list[dict], *, notify: bool = True
+    ) -> str:
+        device_id = self._device_id()
+        entity = changes[0]['table'] if len(changes) == 1 else 'batch'
+        entity_id = str(changes[0]['key'][0]) if changes else ''
         with self._connect() as connection:
             row = connection.execute(
                 'SELECT COALESCE(MAX(lamport), 0) FROM sync_ops WHERE device_id = ?',
@@ -554,183 +556,276 @@ class Ledger:
                     lamport,
                     entity,
                     entity_id,
-                    operation,
-                    json.dumps(payload or {}, sort_keys=True),
+                    'upsert',
+                    json.dumps({'changes': changes}, sort_keys=True),
                     _now(),
                 ),
             )
+        if notify and self.on_sync_op is not None:
+            self.on_sync_op()
         return operation_id
 
-    def list_sync_ops(self) -> list[dict]:
+    def ensure_sync_baseline(self) -> bool:
+        """Seed the first operation from an existing v0.4 database."""
+        if self.get_meta('sync_baseline') == '1' or self.is_empty():
+            return False
+        snapshot = self.sync_snapshot()
+        changes = []
+        for table in SYNC_TABLES:
+            for row in snapshot.get(table.name, {}).values():
+                changes.append(
+                    {
+                        'table': table.name,
+                        'key': [row[column] for column in table.primary_key],
+                        'before': None,
+                        'after': row,
+                    }
+                )
+        if changes:
+            self._append_sync_operation(changes, notify=False)
+        self.set_meta('sync_baseline', '1')
+        return bool(changes)
+
+    def list_sync_ops(
+        self, *, device_id: str | None = None, after_lamport: int = 0
+    ) -> list[dict]:
+        query = 'SELECT * FROM sync_ops'
+        parameters: list[Any] = []
+        clauses = []
+        if device_id is not None:
+            clauses.append('device_id = ?')
+            parameters.append(device_id)
+        if after_lamport:
+            clauses.append('lamport > ?')
+            parameters.append(after_lamport)
+        if clauses:
+            query += ' WHERE ' + ' AND '.join(clauses)
+        query += ' ORDER BY device_id, lamport'
+        with self._connect() as connection:
+            rows = connection.execute(query, parameters).fetchall()
+        return [dict(row) for row in rows]
+
+    def local_sync_ops(self, *, after_lamport: int = 0) -> list[dict]:
+        return self.list_sync_ops(
+            device_id=self._device_id(), after_lamport=after_lamport
+        )
+
+    def list_sync_devices(self) -> list[dict]:
         with self._connect() as connection:
             rows = connection.execute(
-                'SELECT * FROM sync_ops ORDER BY device_id, lamport'
+                'SELECT device_id, MAX(lamport) AS lamport, '
+                'MAX(created_at) AS last_seen FROM sync_ops '
+                'GROUP BY device_id ORDER BY last_seen DESC'
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def seed_legacy(
+    def _sync_row(
         self,
-        balance: Decimal | None,
-        funds: list,
-        categories: list,
-        period: str,
-    ) -> None:
-        """Import the current JSON totals once without duplicating data."""
-        if self.get_meta('legacy_seeded') == '1':
-            return
+        connection: sqlite3.Connection,
+        table_name: str,
+        key: list[Any],
+    ) -> dict | None:
+        table = TABLES_BY_NAME[table_name]
+        where = ' AND '.join(f'{column} = ?' for column in table.primary_key)
+        row = connection.execute(
+            f'SELECT * FROM {table_name} WHERE {where}', key
+        ).fetchone()
+        return dict(row) if row is not None else None
 
-        with self._connect() as connection:
-            has_account = connection.execute(
-                'SELECT 1 FROM accounts LIMIT 1'
+    def _has_recurring_duplicate(
+        self, connection: sqlite3.Connection, changes: list[dict]
+    ) -> bool:
+        for change in changes:
+            if change.get('table') != 'fund_contributions':
+                continue
+            after = change.get('after')
+            if not after or after.get('kind') != 'recurring' or change.get('before'):
+                continue
+            existing = connection.execute(
+                'SELECT id FROM fund_contributions '
+                'WHERE fund_id = ? AND period = ? AND kind = ?',
+                (after['fund_id'], after['period'], 'recurring'),
             ).fetchone()
-            if has_account is None:
-                account_id = uuid4().hex
+            if existing is not None and existing['id'] != after['id']:
+                return True
+        return False
+
+    def _insert_sync_op_record(
+        self, connection: sqlite3.Connection, operation: dict
+    ) -> None:
+        payload = operation['payload']
+        connection.execute(
+            'INSERT OR IGNORE INTO sync_ops '
+            '(id, device_id, lamport, entity, entity_id, op, payload, '
+            'created_at, applied) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)',
+            (
+                operation['id'],
+                operation['device_id'],
+                operation['lamport'],
+                operation['entity'],
+                operation['entity_id'],
+                operation.get('op', 'upsert'),
+                json.dumps(payload, sort_keys=True),
+                operation.get('created_at', _now()),
+            ),
+        )
+
+    def apply_remote_operation(self, operation: dict) -> str:
+        """Apply one verified remote operation.
+
+        Returns ``applied``, ``duplicate``, or ``conflict``. A conflict is
+        stored locally and leaves the database untouched until the user chooses.
+        """
+        try:
+            verify(operation)
+        except ProtocolError:
+            raise
+        with self._connect() as connection:
+            existing = connection.execute(
+                'SELECT 1 FROM sync_ops WHERE id = ?', (operation['id'],)
+            ).fetchone()
+            if existing is not None:
+                return 'duplicate'
+            changes = operation['payload'].get('changes')
+            if not isinstance(changes, list) or not changes:
+                raise ProtocolError('operation contains no changes')
+            if self._has_recurring_duplicate(connection, changes):
+                return 'duplicate'
+            conflict = False
+            changed = False
+            for change in changes:
+                table_name = change.get('table')
+                if table_name not in TABLES_BY_NAME:
+                    raise ProtocolError(f'unknown sync table: {table_name}')
+                current = self._sync_row(connection, table_name, change['key'])
+                if current == change.get('after'):
+                    continue
+                changed = True
+                if current != change.get('before'):
+                    conflict = True
+                    break
+            if not changed:
+                self._insert_sync_op_record(connection, operation)
+                return 'duplicate'
+            if conflict:
                 connection.execute(
-                    'INSERT INTO accounts '
-                    '(id, name, type, currency, opening_balance_minor, archived, created_at) '
-                    'VALUES (?, ?, ?, ?, 0, 0, ?)',
-                    (account_id, 'Savings', 'savings', 'USD', _now()),
-                )
-                if balance is not None and money_to_minor(balance) != 0:
-                    connection.execute(
-                        'INSERT INTO transactions '
-                        '(id, account_id, date, payee, memo, amount_minor, category, '
-                        'cleared, transfer_id, fund_id, created_at, updated_at) '
-                        'VALUES (?, ?, ?, ?, ?, ?, ?, 1, NULL, NULL, ?, ?)',
-                        (
-                            uuid4().hex,
-                            account_id,
-                            date.today().isoformat(),
-                            'Opening balance',
-                            'Migrated from balance.txt',
-                            money_to_minor(balance),
-                            'Opening balance',
-                            _now(),
-                            _now(),
-                        ),
-                    )
-            connection.execute('DELETE FROM funds')
-            for fund in funds:
-                connection.execute(
-                    'INSERT INTO funds '
-                    '(id, name, balance_minor, target_minor, target_date, '
-                    'recurring_transfer_minor, due_day, kind, priority, status, '
-                    'source_account_id, destination_account_id, notes, '
-                    'created_at, updated_at) '
-                    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    'INSERT OR IGNORE INTO sync_conflicts '
+                    '(id, op_id, device_id, lamport, entity, entity_id, payload, '
+                    'created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
                     (
-                        fund.id,
-                        fund.name,
-                        money_to_minor(fund.balance),
-                        money_to_minor(fund.target),
-                        fund.target_date_as_str()
-                        if fund.target_date is not None
-                        else None,
-                        money_to_minor(fund.recurring_transfer),
-                        getattr(fund, 'due_day', 31),
-                        getattr(fund, 'kind', 'savings_goal'),
-                        getattr(fund, 'priority', 0),
-                        getattr(fund, 'status', 'active'),
-                        getattr(fund, 'source_account_id', None),
-                        getattr(fund, 'destination_account_id', None),
-                        getattr(fund, 'notes', ''),
-                        _now(),
+                        uuid4().hex,
+                        operation['id'],
+                        operation['device_id'],
+                        operation['lamport'],
+                        operation['entity'],
+                        operation['entity_id'],
+                        json.dumps(operation, sort_keys=True),
                         _now(),
                     ),
                 )
-            connection.execute('DELETE FROM budget_imports')
-            connection.execute('DELETE FROM budget_allocations')
-            connection.execute('DELETE FROM budget_categories')
-            connection.execute('DELETE FROM category_groups')
-            general_group = uuid4().hex
-            savings_group = uuid4().hex
-            connection.executemany(
-                'INSERT INTO category_groups '
-                '(id, name, kind, sort_order, archived) VALUES (?, ?, ?, ?, 0)',
-                [
-                    (general_group, 'General', 'expense', 0),
-                    (savings_group, 'Savings', 'expense', 1),
-                ],
+                return 'conflict'
+            self._apply_changes(connection, changes)
+            self._insert_sync_op_record(connection, operation)
+            return 'applied'
+
+    def _apply_changes(self, connection: sqlite3.Connection, changes: list[dict]):
+        ordered = sorted(
+            changes,
+            key=lambda change: TABLES_BY_NAME[change['table']].order,
+        )
+        for change in ordered:
+            table = TABLES_BY_NAME[change['table']]
+            after = change.get('after')
+            if after is None:
+                where = ' AND '.join(f'{column} = ?' for column in table.primary_key)
+                connection.execute(
+                    f'DELETE FROM {table.name} WHERE {where}', change['key']
+                )
+                continue
+            columns = list(after)
+            placeholders = ', '.join('?' for _ in columns)
+            connection.execute(
+                f'INSERT OR REPLACE INTO {table.name} '
+                f'({", ".join(columns)}) VALUES ({placeholders})',
+                [after[column] for column in columns],
             )
-            groups = {
-                'General': general_group,
-                'Savings': savings_group,
+
+    def list_sync_conflicts(self) -> list[dict]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                'SELECT * FROM sync_conflicts WHERE resolved_at IS NULL '
+                'ORDER BY created_at, id'
+            ).fetchall()
+        return [
+            {
+                **dict(row),
+                'operation': json.loads(row['payload']),
             }
-            for index, category in enumerate(categories):
-                group_name = getattr(category, 'group', 'General') or 'General'
-                group_id = groups.get(group_name)
-                if group_id is None:
-                    group_id = uuid4().hex
-                    groups[group_name] = group_id
+            for row in rows
+        ]
+
+    def resolve_sync_conflict(self, conflict_id: str, resolution: str) -> dict | None:
+        if resolution not in {'local', 'remote'}:
+            raise ValueError('invalid conflict resolution')
+        counter_changes: list[dict] = []
+        with self._connect() as connection:
+            row = connection.execute(
+                'SELECT * FROM sync_conflicts WHERE id = ?', (conflict_id,)
+            ).fetchone()
+            if row is None or row['resolved_at'] is not None:
+                return None
+            operation = json.loads(row['payload'])
+            if resolution == 'remote':
+                with self._sync_logging_off():
+                    self._apply_changes(connection, operation['payload']['changes'])
+                self._insert_sync_op_record(connection, operation)
+            else:
+                for change in operation['payload']['changes']:
+                    current = self._sync_row(connection, change['table'], change['key'])
+                    if current != change.get('after'):
+                        counter_changes.append(
+                            {
+                                'table': change['table'],
+                                'key': change['key'],
+                                'before': change.get('after'),
+                                'after': current,
+                            }
+                        )
+            connection.execute(
+                'UPDATE sync_conflicts SET resolved_at = ?, resolution = ? '
+                'WHERE id = ?',
+                (_now(), resolution, conflict_id),
+            )
+        if counter_changes:
+            self._append_sync_operation(counter_changes)
+        return operation
+
+    @contextmanager
+    def _sync_logging_off(self):
+        previous = self._sync_logging
+        self._sync_logging = False
+        try:
+            yield
+        finally:
+            self._sync_logging = previous
+
+    def apply_snapshot(self, snapshot: dict) -> bool:
+        """Bootstrap an empty database from a verified snapshot."""
+        if not self.is_empty():
+            return False
+        with self._sync_logging_off(), self._connect() as connection:
+            for table in SYNC_TABLES:
+                rows = snapshot.get('tables', {}).get(table.name, {})
+                for row in rows.values():
+                    columns = list(row)
+                    placeholders = ', '.join('?' for _ in columns)
                     connection.execute(
-                        'INSERT INTO category_groups '
-                        '(id, name, kind, sort_order, archived) VALUES (?, ?, ?, ?, 0)',
-                        (
-                            group_id,
-                            group_name,
-                            category.kind,
-                            len(groups),
-                        ),
+                        f'INSERT OR REPLACE INTO {table.name} '
+                        f'({", ".join(columns)}) VALUES ({placeholders})',
+                        [row[column] for column in columns],
                     )
-                category_id = getattr(category, 'category_id', None) or uuid4().hex
-                connection.execute(
-                    'INSERT OR REPLACE INTO budget_categories '
-                    '(id, group_id, name, kind, rollover, archived, created_at) '
-                    'VALUES (?, ?, ?, ?, 0, 0, ?)',
-                    (category_id, group_id, category.name, category.kind, _now()),
-                )
-                connection.execute(
-                    'INSERT OR REPLACE INTO budget_allocations '
-                    '(period, category_id, budgeted_minor, spent_minor, '
-                    'source_fund_id, sort_order) VALUES (?, ?, ?, ?, ?, ?)',
-                    (
-                        period,
-                        category_id,
-                        money_to_minor(category.budgeted),
-                        money_to_minor(category.spent),
-                        getattr(category, 'source_fund_id', None),
-                        index,
-                    ),
-                )
-                connection.execute(
-                    'INSERT OR REPLACE INTO budget_imports '
-                    '(period, category_name, kind, budgeted_minor, spent_minor) '
-                    'VALUES (?, ?, ?, ?, ?)',
-                    (
-                        period,
-                        category.name,
-                        category.kind,
-                        money_to_minor(category.budgeted),
-                        money_to_minor(category.spent),
-                    ),
-                )
-            connection.execute(
-                'INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)',
-                ('legacy_seeded', '1'),
-            )
-            if (
-                connection.execute(
-                    'SELECT 1 FROM settings WHERE key = ?', ('account_balance_set',)
-                ).fetchone()
-                is None
-            ):
-                connection.execute(
-                    'INSERT INTO settings(key, value, updated_at) VALUES (?, ?, ?)',
-                    (
-                        'account_balance_set',
-                        '1' if balance is not None else '0',
-                        _now(),
-                    ),
-                )
-            connection.execute(
-                'INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)',
-                (
-                    'migration_note',
-                    'Imported the existing account balance, funds, and budget '
-                    'totals into the local ledger. Amounts remain derived from '
-                    'the ledger for new transactions.',
-                ),
-            )
+        self.set_meta('sync_baseline', '1')
+        return True
 
     def list_accounts(self, include_archived: bool = False) -> list[Account]:
         where = '' if include_archived else 'WHERE archived = 0'
@@ -785,6 +880,7 @@ class Ledger:
         accounts = self.list_accounts()
         return accounts[0] if accounts else None
 
+    @_sync_mutation
     def add_account(
         self,
         name: str,
@@ -811,6 +907,7 @@ class Ledger:
         )
         return next(a for a in self.list_accounts() if a.id == account_id)
 
+    @_sync_mutation
     def update_account(self, account_id: str, name: str, account_type: str) -> None:
         name = name.strip()
         if not name:
@@ -823,6 +920,7 @@ class Ledger:
             if cursor.rowcount == 0:
                 raise LedgerError('account does not exist')
 
+    @_sync_mutation
     def adjust_account_balance(
         self,
         account_id: str,
@@ -854,12 +952,14 @@ class Ledger:
             category,
         )
 
+    @_sync_mutation
     def archive_account(self, account_id: str) -> None:
         with self._connect() as connection:
             connection.execute(
                 'UPDATE accounts SET archived = 1 WHERE id = ?', (account_id,)
             )
 
+    @_sync_mutation
     def set_total_balance(self, target: Decimal | str) -> None:
         account = self.default_account()
         if account is None:
@@ -933,6 +1033,7 @@ class Ledger:
             for row in rows
         ]
 
+    @_sync_mutation
     def add_transaction(
         self,
         account_id: str,
@@ -987,6 +1088,7 @@ class Ledger:
             )
         return transaction_id
 
+    @_sync_mutation
     def update_transaction(
         self,
         transaction_id: str,
@@ -1021,6 +1123,7 @@ class Ledger:
             if cursor.rowcount == 0:
                 raise LedgerError('transaction does not exist')
 
+    @_sync_mutation
     def delete_transaction(self, transaction_id: str) -> list[dict]:
         with self._connect() as connection:
             row = connection.execute(
@@ -1041,6 +1144,7 @@ class Ledger:
             )
         return [dict(item) for item in rows]
 
+    @_sync_mutation
     def restore_transactions(self, rows: list[dict]) -> None:
         if not rows:
             return
@@ -1063,6 +1167,7 @@ class Ledger:
                 normalized,
             )
 
+    @_sync_mutation
     def add_transfer(
         self,
         from_account_id: str,
@@ -1162,6 +1267,7 @@ class Ledger:
             ).fetchone()
         return self._fund_from_row(row) if row else None
 
+    @_sync_mutation
     def replace_funds(self, funds: list) -> bool:
         with self._connect() as connection:
             existing = connection.execute(
@@ -1203,6 +1309,7 @@ class Ledger:
             )
         return True
 
+    @_sync_mutation
     def save_fund(self, fund) -> None:
         with self._connect() as connection:
             existing = connection.execute(
@@ -1235,6 +1342,7 @@ class Ledger:
                 ),
             )
 
+    @_sync_mutation
     def update_fund_balance(self, fund_id: str, balance) -> None:
         with self._connect() as connection:
             cursor = connection.execute(
@@ -1287,6 +1395,7 @@ class Ledger:
         )
         return group_id
 
+    @_sync_mutation
     def replace_budget(self, period: str, categories: list) -> bool:
         from budget import BudgetState
 
@@ -1403,6 +1512,7 @@ class Ledger:
         ]
         return BudgetState(categories, period)
 
+    @_sync_mutation
     def save_budget_history(self, snapshot: dict) -> bool:
         period = snapshot.get('period')
         if not isinstance(period, str):
@@ -1433,6 +1543,7 @@ class Ledger:
             ).fetchall()
         return [json.loads(row['snapshot_json']) for row in rows]
 
+    @_sync_mutation
     def delete_budget_period(self, period: str) -> None:
         with self._connect() as connection:
             connection.execute(
@@ -1516,6 +1627,7 @@ class Ledger:
         )
         return transaction_id, 'earmark'
 
+    @_sync_mutation
     def add_fund_contribution(
         self,
         fund,
@@ -1635,14 +1747,9 @@ class Ledger:
                     memo.strip(),
                 ),
             )
-        self.record_sync_op(
-            'fund_contribution',
-            contribution_id,
-            'post',
-            {'fund_id': fund_id, 'period': period, 'amount_minor': value_minor},
-        )
         return self.get_fund_contribution(contribution_id)
 
+    @_sync_mutation
     def withdraw_fund(
         self,
         fund,
@@ -1758,6 +1865,7 @@ class Ledger:
             ).fetchall()
         return [self._contribution_from_row(row) for row in rows]
 
+    @_sync_mutation
     def undo_fund_contribution(self, contribution_id: str) -> bool:
         with self._connect() as connection:
             row = connection.execute(
@@ -1792,9 +1900,6 @@ class Ledger:
                 'transaction_id = NULL WHERE id = ?',
                 (contribution_id,),
             )
-        self.record_sync_op(
-            'fund_contribution', contribution_id, 'undo', {'status': 'undone'}
-        )
         return True
 
     def export_json(self, destination: Path) -> Path:
@@ -1823,6 +1928,7 @@ class Ledger:
         destination.write_text(json.dumps(document, indent=2) + '\n', encoding='utf-8')
         return destination
 
+    @_sync_mutation
     def import_json(self, source: Path) -> None:
         source = Path(source)
         document = json.loads(source.read_text(encoding='utf-8'))

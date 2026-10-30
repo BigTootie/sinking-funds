@@ -88,41 +88,6 @@ def test_transfer_delete_removes_both_legs(tmp_path):
     assert ledger.list_transactions() == []
 
 
-def test_legacy_seed_is_idempotent_and_preserves_totals(tmp_path):
-    class Fund:
-        id = 'fund-1'
-        name = 'Car'
-        balance = Decimal('100')
-        target = Decimal('1000')
-        target_date = None
-        recurring_transfer = Decimal('50')
-
-        def target_date_as_str(self):
-            return 'None'
-
-    class Category:
-        name = 'Rent'
-        kind = 'expense'
-        budgeted = Decimal('1200')
-        spent = Decimal('350')
-
-    ledger = make_ledger(tmp_path)
-    ledger.seed_legacy(Decimal('500'), [Fund()], [Category()], '2026-10')
-    ledger.seed_legacy(Decimal('999'), [], [], '2026-10')
-
-    assert ledger.total_balance() == Decimal('500.00')
-    account = ledger.default_account()
-    assert (
-        account is not None and account.name == 'Savings' and account.type == 'savings'
-    )
-    with ledger._connect() as connection:
-        assert connection.execute('SELECT COUNT(*) FROM funds').fetchone()[0] == 1
-        assert (
-            connection.execute('SELECT COUNT(*) FROM budget_imports').fetchone()[0] == 1
-        )
-    assert ledger.get_meta('legacy_seeded') == '1'
-
-
 def test_ledger_export_import_round_trip(tmp_path):
     ledger = make_ledger(tmp_path)
     account = ledger.add_account('Checking', opening_balance='100')

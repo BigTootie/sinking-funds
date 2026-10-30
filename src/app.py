@@ -18,14 +18,12 @@ from budget import (
 )
 from data import (
     DataFileError,
-    UnsupportedSchemaError,
     backup_database,
     copy_plan_forward,
     export_database,
     latest_database_backup,
     load_budget,
     load_funds,
-    migrate_legacy_json_data,
     reset_budget_period,
     restore_database,
     rollover_budget,
@@ -35,15 +33,17 @@ from data import (
 from fund import Fund
 from ledger import Ledger, LedgerError
 from nextcloud import (
-    SyncConflictError,
     credential_storage_warning,
+    delete_sync_key,
+    get_sync_key,
     load_nextcloud_sync_data_from_db,
-    migrate_nextcloud_file_to_db,
-    ping_nextcloud_server,
     save_nextcloud_sync_data_to_db,
-    sync_data_to_nextcloud,
+    set_sync_key,
 )
 from paths import open_data_folder
+from sync.crypto import SyncCrypto
+from sync.engine import SyncEngine, SyncError
+from sync.webdav import WebDAVProvider
 from ui.budget import BudgetDashboard
 from ui.navigation import AppPageNavigation
 from ui.savings import Dashboard
@@ -93,11 +93,15 @@ class SavingsFundsApp:
         self.navigation = None
         self.startup_errors: list[str] = []
         self.startup_notice: str | None = None
-        self._sync_pending: dict[str, Path] = {}
-        self._sync_failed: dict[str, Path] = {}
+        self.sync_engine: SyncEngine | None = None
+        self._sync_passphrase: str | None = None
         self._sync_task = None
+        self._sync_requested = False
+        self._sync_lock = asyncio.Lock()
+        self._sync_ready = False
         self._period_task = None
         self._writes_blocked = False
+        self.ledger.on_sync_op = self._on_sync_op
         self._initialize_page()
 
     def _initialize_page(self):
@@ -135,6 +139,7 @@ class SavingsFundsApp:
             self._open_data_folder,
             self.theme_mode,
             self.set_theme_mode,
+            self._show_sync_conflicts,
         )
 
         self.page.add(
@@ -148,21 +153,10 @@ class SavingsFundsApp:
         )
 
     async def perform_nextcloud_sync(self):
-        """Load Nextcloud settings from SQLite without blocking offline use.
-
-        v0.4 stores connection settings and sync state in the single local
-        database. Whole-file WebDAV synchronization is intentionally deferred
-        to the v0.5 operation-log sync work; no remote file is read or written
-        in this release.
-        """
-        try:
-            migrate_nextcloud_file_to_db(self.ledger)
-        except (DataFileError, OSError) as exc:
-            self.startup_errors.append(str(exc))
-
+        """Load synchronization settings and schedule the startup sync."""
         try:
             self.nextcloud_sync_data = load_nextcloud_sync_data_from_db(self.ledger)
-        except (DataFileError, OSError) as exc:
+        except (DataFileError, OSError, SyncError) as exc:
             self.startup_errors.append(str(exc))
             self.nextcloud_sync_data = None
 
@@ -172,13 +166,9 @@ class SavingsFundsApp:
                 f'{self.startup_notice} {warning}' if self.startup_notice else warning
             )
         if self.nextcloud_sync_data:
-            notice = (
-                'Nextcloud settings are stored locally. Multi-device file sync '
-                'will return in v0.5.'
-            )
-            self.startup_notice = (
-                f'{self.startup_notice} {notice}' if self.startup_notice else notice
-            )
+            self._configure_sync_engine()
+            self._update_sync_status()
+            self._schedule_sync()
             return
 
         if self.ledger.get_meta('nextcloud_prompted') == '1':
@@ -200,59 +190,128 @@ class SavingsFundsApp:
             finally:
                 self.ledger.set_meta('nextcloud_prompted', '1')
 
-    def _sync_file_in_background(self, file_path: Path):
+    def _configure_sync_engine(self):
         if not self.nextcloud_sync_data:
+            self.sync_engine = None
             return
-        file_path = Path(file_path)
-        self._sync_pending[file_path.name] = file_path
-        # Retry files that failed on a previous attempt when the next change occurs.
-        self._sync_pending.update(self._sync_failed)
-        self._sync_failed.clear()
+        data = self.nextcloud_sync_data
+        try:
+            provider = WebDAVProvider(
+                data['base_url'],
+                data['username'],
+                data['password'],
+                data['data_path'],
+            )
+            crypto = None
+            salt = data.get('kdf_salt')
+            passphrase = self._sync_passphrase
+            if data.get('encrypted'):
+                encoded_key = get_sync_key()
+                if encoded_key:
+                    crypto = SyncCrypto.from_encoded_key(encoded_key, salt)
+                    passphrase = None
+                elif not passphrase:
+                    raise SyncError(
+                        'Sync encryption is enabled but its key is unavailable. '
+                        'Enter the sync passphrase in Settings.'
+                    )
+            self.sync_engine = SyncEngine(
+                self.ledger,
+                provider,
+                crypto=crypto,
+                salt=salt,
+                passphrase=passphrase,
+            )
+        except (KeyError, ValueError, SyncError) as exc:
+            self.sync_engine = None
+            self.startup_errors.append(str(exc))
+            self.ledger.set_sync_state('last_error', str(exc))
+
+    def _on_sync_op(self):
+        if self._sync_ready and self.nextcloud_sync_data:
+            self._schedule_sync()
+
+    def _schedule_sync(self):
+        if not self._sync_ready or self.sync_engine is None:
+            return
+        self._sync_requested = True
         if self._sync_task is None or self._sync_task.done():
             self._sync_task = self.page.run_task(self._sync_worker)
 
     async def _sync_worker(self):
         try:
-            while self._sync_pending:
+            while self._sync_requested:
+                self._sync_requested = False
                 await asyncio.sleep(SYNC_DEBOUNCE_SECONDS)
-                pending = list(self._sync_pending.values())
-                self._sync_pending.clear()
-                for index, file_path in enumerate(pending):
-                    if not self.nextcloud_sync_data:
-                        return
-                    if not file_path.exists():
-                        continue
-                    try:
-                        await asyncio.to_thread(
-                            sync_data_to_nextcloud, file_path, self.nextcloud_sync_data
-                        )
-                    except SyncConflictError as exc:
-                        self._show_sync_error(str(exc))
-                        # A conflict needs a fresh startup reconciliation. Keep
-                        # the other files queued for the next local change.
-                        self._defer_uploads(pending[index + 1 :])
-                        return
-                    except Exception as exc:
-                        logger.exception('Nextcloud upload failed for %s', file_path)
-                        self._show_sync_error(
-                            f'Could not upload {file_path.name}: {exc}. '
-                            'The change is saved locally and will be retried after '
-                            'your next change.'
-                        )
-                        self._defer_uploads(pending[index:])
-                        return
+                await self._run_sync(manual=False)
         finally:
             self._sync_task = None
 
-    def _defer_uploads(self, file_paths):
-        """Retain failed and untouched uploads for the next change."""
-        for file_path in file_paths:
-            self._sync_failed[file_path.name] = file_path
-        self._sync_failed.update(self._sync_pending)
-        self._sync_pending.clear()
+    async def _run_sync(self, *, manual: bool = False):
+        if self.sync_engine is None:
+            if manual:
+                self._show_snack('Configure Nextcloud before syncing.', colors.RED)
+            return None
+        try:
+            async with self._sync_lock:
+                outcome = await asyncio.to_thread(self.sync_engine.sync)
+        except (OSError, SyncError, ValueError) as exc:
+            logger.exception('Nextcloud sync failed')
+            self.ledger.set_sync_state('last_error', str(exc))
+            self._update_sync_status(error=True)
+            self._show_snack(f'Nextcloud sync failed: {exc}', colors.RED)
+            return None
+        engine = self.sync_engine
+        if (
+            engine is not None
+            and getattr(engine, 'crypto', None) is not None
+            and self.nextcloud_sync_data
+            and self.nextcloud_sync_data.get('encrypted')
+            and set_sync_key(engine.crypto.encoded_key())
+        ):
+            data = dict(self.nextcloud_sync_data)
+            data['kdf_salt'] = engine.crypto.salt
+            save_nextcloud_sync_data_to_db(data, self.ledger)
+            self.nextcloud_sync_data = data
+            self._sync_passphrase = None
+        self._reload_restored_data()
+        self._update_sync_status()
+        if outcome.conflicts:
+            self._show_snack(
+                f'Sync paused: {outcome.conflicts} conflict'
+                f'{"s" if outcome.conflicts != 1 else ""} need review.',
+                colors.RED,
+            )
+        elif manual:
+            self._show_snack(
+                f'Sync complete. {outcome.applied} remote change'
+                f'{"s" if outcome.applied != 1 else ""} applied.'
+            )
+        return outcome
 
-    def _show_sync_error(self, message: str):
-        self._show_snack(message, colors.RED)
+    def _update_sync_status(self, *, error: bool = False):
+        if not hasattr(self, 'settings_view'):
+            return
+        conflicts = len(self.ledger.list_sync_conflicts())
+        last_error = self.ledger.get_sync_state('last_error') or ''
+        last_sync = self.ledger.get_sync_state('last_sync')
+        if error or last_error:
+            self.settings_view.set_sync_status(
+                f'Sync error: {last_error or "retry required"}', error=True
+            )
+        elif conflicts:
+            self.settings_view.set_sync_status(
+                f'{conflicts} conflict{"s" if conflicts != 1 else ""} need review.',
+                error=True,
+            )
+        elif last_sync:
+            devices = len(self.ledger.list_sync_devices())
+            self.settings_view.set_sync_status(
+                f'Last synced {last_sync}. {devices} device'
+                f'{"s" if devices != 1 else ""} known.'
+            )
+        else:
+            self.settings_view.set_sync_status('Sync is ready.')
 
     def _show_snack(self, message: str, bgcolor=None):
         show_snack(self.page, message, bgcolor=bgcolor)
@@ -387,25 +446,40 @@ class SavingsFundsApp:
         self.page.update()
 
     def _on_nextcloud_config_saved(self, sync_data):
-        self.nextcloud_sync_data = sync_data
+        data = dict(sync_data)
+        passphrase = data.pop('passphrase', None)
+        if data.get('encrypted'):
+            if passphrase:
+                self._sync_passphrase = passphrase
+            elif not get_sync_key():
+                self._show_snack(
+                    'Enter a sync passphrase to enable encryption.', colors.RED
+                )
+                return
+            else:
+                self._sync_passphrase = None
+            save_nextcloud_sync_data_to_db(data, self.ledger)
+        else:
+            self._sync_passphrase = None
+            data.pop('kdf_salt', None)
+            delete_sync_key()
+            save_nextcloud_sync_data_to_db(data, self.ledger)
+        self.nextcloud_sync_data = data
+        self._configure_sync_engine()
+        self._update_sync_status()
         if hasattr(self, 'settings_view'):
             self.settings_view.control.visible = True
         self.page.update()
         self._show_credential_warning()
+        self._schedule_sync()
 
     async def _manual_sync(self):
         if not self.nextcloud_sync_data:
             self._show_snack('Configure Nextcloud before syncing.', colors.RED)
             return
-        success, message = await asyncio.to_thread(
-            ping_nextcloud_server, self.nextcloud_sync_data
-        )
-        if success:
-            self._show_snack(
-                'Nextcloud connection OK. Multi-device data sync returns in v0.5.'
-            )
-        else:
-            self._show_snack(f'Nextcloud sync failed: {message}', colors.RED)
+        if hasattr(self, 'settings_view'):
+            self.settings_view.set_sync_status('Syncing…')
+        await self._run_sync(manual=True)
 
     def _disable_nextcloud_sync(self):
         if (
@@ -418,24 +492,75 @@ class SavingsFundsApp:
         ):
             return
         self.nextcloud_sync_data = None
-        self._sync_pending.clear()
-        self._sync_failed.clear()
+        self.sync_engine = None
+        self._sync_passphrase = None
+        self._sync_requested = False
+        self._update_sync_status()
         self._show_snack('Nextcloud synchronization is disabled.')
         self._show_credential_warning()
 
     def _record_load_error(self, exc: Exception):
-        if isinstance(exc, UnsupportedSchemaError):
-            self._writes_blocked = True
         self.startup_errors.append(str(exc))
+
+    def _show_sync_conflicts(self):
+        conflicts = self.ledger.list_sync_conflicts()
+        if not conflicts:
+            self._show_snack('There are no synchronization conflicts.')
+            return
+        rows = []
+        for conflict in conflicts:
+            entity = conflict.get('entity', 'record')
+            entity_id = str(conflict.get('entity_id', ''))[:8]
+            rows.append(
+                ft.Row(
+                    [
+                        ft.Text(f'{entity} {entity_id}', expand=True),
+                        ft.TextButton(
+                            'Keep local',
+                            key=f'sync-keep-local-{conflict["id"]}',
+                            on_click=lambda e, item=conflict: self._resolve_conflict(
+                                item['id'], 'local'
+                            ),
+                        ),
+                        ft.TextButton(
+                            'Use remote',
+                            key=f'sync-use-remote-{conflict["id"]}',
+                            on_click=lambda e, item=conflict: self._resolve_conflict(
+                                item['id'], 'remote'
+                            ),
+                        ),
+                    ]
+                )
+            )
+        self.page.show_dialog(
+            ft.AlertDialog(
+                title='Synchronization conflicts',
+                content=ft.Column(rows, tight=True, scroll=ft.ScrollMode.AUTO),
+                actions=[
+                    ft.TextButton(
+                        'Close',
+                        key='sync-conflicts-close',
+                        on_click=lambda e: self.page.pop_dialog(),
+                    )
+                ],
+                modal=True,
+            )
+        )
+
+    def _resolve_conflict(self, conflict_id: str, resolution: str):
+        try:
+            self.ledger.resolve_sync_conflict(conflict_id, resolution)
+        except (LedgerError, OSError, ValueError) as exc:
+            self._show_snack(f'Could not resolve conflict: {exc}', colors.RED)
+            return
+        self.page.pop_dialog()
+        self._reload_restored_data()
+        self._update_sync_status()
+        self._show_snack('Conflict resolved.')
 
     def load_account_balance_and_funds(self):
         funds_loaded = True
         budget_loaded = True
-        try:
-            migrate_legacy_json_data(self.ledger)
-        except (DataFileError, OSError, LedgerError) as exc:
-            self._record_load_error(exc)
-
         try:
             self.funds = load_funds(self.ledger)
         except (DataFileError, OSError, LedgerError) as exc:
@@ -600,6 +725,8 @@ class SavingsFundsApp:
         self.page.add(self.navigation.page_view)
         self.page.update()
         self.start_period_watcher()
+        self._sync_ready = True
+        self._schedule_sync()
 
         if self.startup_notice:
             self._show_snack(self.startup_notice)

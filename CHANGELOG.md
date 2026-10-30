@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.5.0 — 2026-10-30
+
+### Multi-device sync v2
+
+- Add an append-only device operation log with Lamport ordering, checksums,
+  per-device cursors, and idempotent replay.
+- Add compact per-device operation documents and snapshots over Nextcloud
+  WebDAV, plus a local-folder provider for tests and LAN-style setups.
+- Sync automatically after startup and local changes, with manual retry when a
+  sync fails.
+- Block conflicting edits instead of overwriting either side. Conflicts remain
+  local until the user chooses **Keep local** or **Use remote** in Settings.
+- Deduplicate recurring fund contributions across devices with the existing
+  `(fund_id, period)` identity, including offline catch-up cases.
+- Add optional end-to-end encryption using a user passphrase or recovery key,
+  AES-GCM payloads, and a key stored in the OS keyring.
+- Add sync status, last-sync/error reporting, device cursors, and conflict
+  review to Settings.
+- Ensure Nextcloud failures, invalid documents, checksum mismatches, and
+  unsupported protocol versions fail safely without corrupting local data.
+
+### One local data file
+
+- Remove all legacy `balance.txt`, `funds.json`, `budget.json`,
+  `budget_history.json`, `nextcloud_sync.json`, and `sync_state.json` support,
+  including startup copying and JSON migration.
+- Keep `ledger.db` as the only runtime data store. SQLite WAL files are
+  temporary, and backups/exports remain explicit user actions.
+- Store sync state, cursors, conflicts, and operation history in the same
+  database. No local JSONL cache or live database file is uploaded.
+- Prune database backups to the latest ten files.
+
+### Quality
+
+- Add protocol, encryption, local-provider, WebDAV request, two-device merge,
+  conflict, snapshot, auto-post deduplication, and sync UI tests.
+- Keep Ruff, formatting, mypy, compileall, and the full offline suite green.
+
 ## 0.4.0 — 2026-10-30
 
 ### Single-database storage

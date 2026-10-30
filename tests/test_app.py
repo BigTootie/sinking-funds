@@ -1,124 +1,39 @@
-"""Application startup and background upload coordination tests."""
+"""Application startup, restore, and synchronization coordination tests."""
 
-import asyncio
-import json
 from datetime import datetime
 from decimal import Decimal
 
 import pytest
+from ui_helpers import FakePage
 
 import app as app_module
 import data
 import ledger
-import nextcloud
-from budget import BudgetCategory, BudgetState
+from budget import BudgetCategory, BudgetState, current_period
 from fund import Fund
-from nextcloud import SyncConflictError
-
-SYNC_DATA = {
-    'base_url': 'cloud.example.test',
-    'username': 'test-user',
-    'password': 'test-password',
-    'data_path': 'Savings',
-}
+from sync.engine import SyncOutcome
 
 
-class FakePage:
-    """Minimal page surface used by SavingsFundsApp outside a Flutter host."""
-
-    def __init__(self):
-        self.width = 800
-        self.scroll = None
-        self.navigation_bar = None
-        self.controls = []
-        self.dialogs = []
-
-    def add(self, *controls):
-        self.controls.extend(controls)
-
-    def update(self):
-        pass
-
-    def show_dialog(self, control):
-        self.dialogs.append(control)
-
-    def pop_dialog(self):
-        if self.dialogs:
-            self.dialogs.pop()
-
-    def run_task(self, handler, *args, **kwargs):
-        return asyncio.create_task(handler(*args, **kwargs))
-
-
-def patch_app_paths(monkeypatch, tmp_path):
-    paths = {
-        'balance': tmp_path / 'balance.txt',
-        'funds': tmp_path / 'funds.json',
-        'budget': tmp_path / 'budget.json',
-        'history': tmp_path / 'budget_history.json',
-        'config': tmp_path / 'nextcloud_sync.json',
-        'state': tmp_path / 'sync_state.json',
-        'database': tmp_path / 'ledger.db',
-    }
-    for module in (data, nextcloud):
-        monkeypatch.setattr(module, 'ACCOUNT_BALANCE_FILE', paths['balance'])
-        monkeypatch.setattr(module, 'FUNDS_FILE', paths['funds'])
-        monkeypatch.setattr(module, 'BUDGET_FILE', paths['budget'])
-        monkeypatch.setattr(module, 'BUDGET_HISTORY_FILE', paths['history'])
-    monkeypatch.setattr(ledger, 'LEDGER_DB', paths['database'])
-    monkeypatch.setattr(nextcloud, 'NEXTCLOUD_DATA_FILE', paths['config'])
-    monkeypatch.setattr(nextcloud, 'SYNC_STATE_FILE', paths['state'])
-    return paths
-
-
-def seed_local_data(paths):
-    paths['balance'].write_text('1234.50', encoding='utf-8')
-    paths['funds'].write_text(
-        json.dumps(
-            {
-                'version': 2,
-                'funds': [
-                    {
-                        'id': 'fund-id',
-                        'name': 'Emergency',
-                        'target': 5000,
-                        'balance': 750,
-                        'target_date': 'None',
-                        'recurring_transfer': 0,
-                    }
-                ],
-            }
-        ),
-        encoding='utf-8',
+def make_app(monkeypatch, tmp_path, *, prompted=True):
+    ledger_path = tmp_path / 'ledger.db'
+    monkeypatch.setattr(ledger, 'LEDGER_DB', ledger_path)
+    store = ledger.Ledger(ledger_path)
+    store.set_meta('nextcloud_prompted', '1' if prompted else '0')
+    store.add_account('Savings', 'savings', '1234.50')
+    store.set_setting('account_balance_set', '1')
+    store.replace_funds([Fund('Emergency', 5000, 750)])
+    store.replace_budget(
+        '2026-10', [BudgetCategory('Rent', 1200, 1200, group='Housing')]
     )
-    paths['budget'].write_text(
-        json.dumps(
-            {
-                'version': 2,
-                'period': '2026-10',
-                'categories': [
-                    {
-                        'id': 'category-id',
-                        'name': 'Rent',
-                        'budgeted': 1200,
-                        'spent': 1200,
-                        'kind': 'expense',
-                    }
-                ],
-            }
-        ),
-        encoding='utf-8',
-    )
+    app = app_module.SavingsFundsApp(FakePage())
+    return app, ledger_path
 
 
 @pytest.mark.asyncio
-async def test_startup_migrates_legacy_json_into_sqlite(monkeypatch, tmp_path):
-    paths = patch_app_paths(monkeypatch, tmp_path)
-    seed_local_data(paths)
-    paths['config'].write_text('{}', encoding='utf-8')
-
-    app = app_module.SavingsFundsApp(FakePage())
-    app._sync_file_in_background = lambda _path: None
+async def test_startup_loads_the_single_database_and_initializes_dashboard(
+    monkeypatch, tmp_path
+):
+    app, ledger_path = make_app(monkeypatch, tmp_path)
 
     await app.perform_nextcloud_sync()
     app.load_account_balance_and_funds()
@@ -127,31 +42,28 @@ async def test_startup_migrates_legacy_json_into_sqlite(monkeypatch, tmp_path):
     assert [fund.name for fund in app.funds] == ['Emergency']
     assert [category.name for category in app.budget_categories] == ['Rent']
     assert app.dashboard is not None
-    assert paths['database'].is_file()
-    assert app.ledger.get_meta('legacy_json_migrated') == '1'
-    # Legacy files are migration sources, not the runtime destination.
-    assert paths['balance'].read_text(encoding='utf-8') == '1234.50'
+    assert ledger_path.is_file()
+    assert not (tmp_path / 'balance.txt').exists()
+    assert not (tmp_path / 'funds.json').exists()
 
 
 @pytest.mark.asyncio
 async def test_nextcloud_setup_timeout_does_not_block_local_startup(
     monkeypatch, tmp_path
 ):
-    paths = patch_app_paths(monkeypatch, tmp_path)
     monkeypatch.setattr(app_module, 'NEXTCLOUD_SETUP_TIMEOUT_SECONDS', 0.01)
-    app = app_module.SavingsFundsApp(FakePage())
+    app, _ledger_path = make_app(monkeypatch, tmp_path, prompted=False)
+    app.ledger.set_meta('nextcloud_prompted', '0')
 
     await app.perform_nextcloud_sync()
 
     assert 'timed out' in app.startup_notice
-    assert not paths['config'].exists()
 
 
 def test_rollover_restores_memory_when_the_budget_cannot_be_saved(
     monkeypatch, tmp_path
 ):
-    patch_app_paths(monkeypatch, tmp_path)
-    app = app_module.SavingsFundsApp(FakePage())
+    app, _ledger_path = make_app(monkeypatch, tmp_path)
     app.budget_state = BudgetState([BudgetCategory('Groceries', 1200, 350)], '2026-09')
     app.budget_categories = app.budget_state.categories
 
@@ -167,32 +79,12 @@ def test_rollover_restores_memory_when_the_budget_cannot_be_saved(
     assert any('Could not save budget plan' in error for error in app.startup_errors)
 
 
-def test_newer_schema_disables_writes_instead_of_overwriting_the_file(
-    monkeypatch, tmp_path
-):
-    paths = patch_app_paths(monkeypatch, tmp_path)
-    seed_local_data(paths)
-    paths['funds'].write_text(
-        json.dumps({'version': 99, 'funds': []}), encoding='utf-8'
-    )
-    original = paths['funds'].read_text(encoding='utf-8')
-    app = app_module.SavingsFundsApp(FakePage())
-
-    app.load_account_balance_and_funds()
-
-    assert app._writes_blocked is True
-    assert paths['funds'].read_text(encoding='utf-8') == original
-    assert any('newer than supported' in error for error in app.startup_errors)
-
-
 def test_restore_reloads_the_running_app_state(monkeypatch, tmp_path):
-    paths = patch_app_paths(monkeypatch, tmp_path)
-    seed_local_data(paths)
-    app = app_module.SavingsFundsApp(FakePage())
+    app, _ledger_path = make_app(monkeypatch, tmp_path)
     app.load_account_balance_and_funds()
     backup = data.backup_database(app.ledger)
 
-    app.ledger.replace_funds([Fund('Changed', 100, fund_id='changed-fund')])
+    app.ledger.replace_funds([Fund('Changed', 100)])
     app._perform_restore(backup)
 
     assert [fund.name for fund in app.funds] == ['Emergency']
@@ -200,151 +92,115 @@ def test_restore_reloads_the_running_app_state(monkeypatch, tmp_path):
     assert app.budget_state.categories is app.budget_categories
 
 
-@pytest.mark.asyncio
-async def test_startup_imports_legacy_nextcloud_settings_without_network(
-    monkeypatch, tmp_path
-):
-    paths = patch_app_paths(monkeypatch, tmp_path)
-    seed_local_data(paths)
-    paths['config'].write_text(json.dumps(SYNC_DATA), encoding='utf-8')
-
-    def fail_network(_sync_data):
-        raise AssertionError('v0.4 must not perform WebDAV synchronization')
-
-    monkeypatch.setattr(app_module, 'sync_data_to_nextcloud', fail_network)
-    app = app_module.SavingsFundsApp(FakePage())
-    app._sync_file_in_background = lambda _path: None
-
-    await app.perform_nextcloud_sync()
-
-    stored = json.loads(app.ledger.get_setting('nextcloud_config'))
-    assert stored['base_url'] == 'cloud.example.test'
-    assert 'password' not in stored
-    assert any('keyring' in error.lower() for error in app.startup_errors)
-
-
-def worker_app():
-    app = object.__new__(app_module.SavingsFundsApp)
-    app.page = FakePage()
-    app.nextcloud_sync_data = SYNC_DATA
-    app._sync_pending = {}
-    app._sync_failed = {}
-    app._sync_task = None
-    app.sync_errors = []
-    app._show_sync_error = app.sync_errors.append
-    return app
-
-
-@pytest.mark.asyncio
-async def test_sync_worker_uploads_pending_files_in_order(monkeypatch, tmp_path):
-    monkeypatch.setattr(app_module, 'SYNC_DEBOUNCE_SECONDS', 0)
-    uploaded = []
-    monkeypatch.setattr(
-        app_module,
-        'sync_data_to_nextcloud',
-        lambda path, _sync_data: uploaded.append(path.name),
-    )
-    app = worker_app()
-    files = [tmp_path / name for name in ('funds.json', 'budget.json', 'balance.txt')]
-    for file_path in files:
-        file_path.write_text('{}', encoding='utf-8')
-    app._sync_pending = {file_path.name: file_path for file_path in files}
-
-    await app._sync_worker()
-
-    assert uploaded == ['funds.json', 'budget.json', 'balance.txt']
-    assert app._sync_pending == {}
-    assert app._sync_failed == {}
-    assert app._sync_task is None
-
-
-@pytest.mark.asyncio
-async def test_sync_worker_requeues_failed_batch_and_retries_on_next_change(
-    monkeypatch, tmp_path
-):
-    monkeypatch.setattr(app_module, 'SYNC_DEBOUNCE_SECONDS', 0)
-    files = {
-        name: tmp_path / name
-        for name in ('funds.json', 'budget.json', 'budget_history.json', 'balance.txt')
-    }
-    for file_path in files.values():
-        file_path.write_text('{}', encoding='utf-8')
-
-    uploaded = []
-
-    def failing_upload(path, _sync_data):
-        if path.name == 'funds.json':
-            raise nextcloud.SyncError('network down')
-        uploaded.append(path.name)
-
-    monkeypatch.setattr(app_module, 'sync_data_to_nextcloud', failing_upload)
-    app = worker_app()
-    app._sync_pending = {
-        name: files[name]
-        for name in ('funds.json', 'budget.json', 'budget_history.json')
-    }
-
-    await app._sync_worker()
-
-    assert uploaded == []
-    assert set(app._sync_failed) == {'funds.json', 'budget.json', 'budget_history.json'}
-    assert app._sync_pending == {}
-    assert len(app.sync_errors) == 1
-    assert 'next change' in app.sync_errors[0]
-
-    monkeypatch.setattr(
-        app_module,
-        'sync_data_to_nextcloud',
-        lambda path, _sync_data: uploaded.append(path.name),
-    )
-    app._sync_file_in_background(files['balance.txt'])
-    await app._sync_task
-
-    assert uploaded == [
-        'balance.txt',
-        'funds.json',
-        'budget.json',
-        'budget_history.json',
-    ]
-    assert app._sync_failed == {}
-    assert app._sync_pending == {}
-
-
-@pytest.mark.asyncio
-async def test_sync_worker_does_not_repeat_a_conflicted_upload(monkeypatch, tmp_path):
-    monkeypatch.setattr(app_module, 'SYNC_DEBOUNCE_SECONDS', 0)
-    files = [tmp_path / name for name in ('funds.json', 'budget.json')]
-    for file_path in files:
-        file_path.write_text('{}', encoding='utf-8')
-
-    def conflict_upload(path, _sync_data):
-        if path.name == 'funds.json':
-            raise SyncConflictError('remote changed')
-        raise AssertionError(f'unexpected upload for {path.name}')
-
-    monkeypatch.setattr(app_module, 'sync_data_to_nextcloud', conflict_upload)
-    app = worker_app()
-    app._sync_pending = {file_path.name: file_path for file_path in files}
-
-    await app._sync_worker()
-
-    assert 'funds.json' not in app._sync_failed
-    assert set(app._sync_failed) == {'budget.json'}
-    assert app._sync_pending == {}
-    assert app.sync_errors == ['remote changed']
-
-
 def test_initialize_dashboard_forces_the_current_budget_month(monkeypatch, tmp_path):
-    paths = patch_app_paths(monkeypatch, tmp_path)
-    seed_local_data(paths)
-    paths['config'].write_text('{}', encoding='utf-8')
-    app = app_module.SavingsFundsApp(FakePage())
+    app, _ledger_path = make_app(monkeypatch, tmp_path)
     app.load_account_balance_and_funds()
 
     app.budget_state.period = '2027-03'
     app.initialize_dashboard()
 
-    from budget import current_period
-
     assert app.budget_state.period == current_period()
     assert app.budget_dashboard.period == current_period()
+
+
+@pytest.mark.asyncio
+async def test_manual_sync_uses_the_sync_engine_and_reports_status(
+    monkeypatch, tmp_path
+):
+    app, _ledger_path = make_app(monkeypatch, tmp_path)
+    app.load_account_balance_and_funds()
+    app.nextcloud_sync_data = {
+        'base_url': 'cloud.example.test',
+        'username': 'test',
+        'password': 'test-password',
+        'data_path': 'Savings',
+    }
+
+    class Engine:
+        def sync(self):
+            app.ledger.set_sync_state('last_sync', '2026-10-30T12:00:00')
+            return SyncOutcome(applied=2, last_sync='2026-10-30T12:00:00')
+
+    app.sync_engine = Engine()
+    await app._manual_sync()
+
+    assert app.ledger.get_sync_state('last_sync') == '2026-10-30T12:00:00'
+    assert any(
+        'Sync complete' in getattr(dialog, 'content', None).value
+        for dialog in app.page.dialogs
+        if hasattr(dialog, 'content')
+    )
+
+
+@pytest.mark.asyncio
+async def test_local_changes_schedule_a_background_sync(monkeypatch, tmp_path):
+    monkeypatch.setattr(app_module, 'SYNC_DEBOUNCE_SECONDS', 0)
+    app, _ledger_path = make_app(monkeypatch, tmp_path)
+    app.load_account_balance_and_funds()
+    app.nextcloud_sync_data = {
+        'base_url': 'cloud.example.test',
+        'username': 'test',
+        'password': 'test-password',
+        'data_path': 'Savings',
+    }
+    calls = []
+
+    class Engine:
+        crypto = None
+
+        def sync(self):
+            calls.append(True)
+            app.ledger.set_sync_state('last_sync', '2026-10-30T12:00:00')
+            return SyncOutcome(applied=0, last_sync='2026-10-30T12:00:00')
+
+    app.sync_engine = Engine()
+    app._sync_ready = True
+    app._on_sync_op()
+    assert app._sync_task is not None
+    await app._sync_task
+
+    assert calls == [True]
+
+
+def test_conflict_review_can_accept_the_remote_value(monkeypatch, tmp_path):
+    from sync.protocol import seal
+
+    app, _ledger_path = make_app(monkeypatch, tmp_path)
+    app.load_account_balance_and_funds()
+    account = app.ledger.list_accounts()[0]
+    before = app.ledger.sync_snapshot()['accounts'][account.id]
+
+    app.ledger.update_account(account.id, 'Local name', 'savings')
+    after = dict(before, name='Remote name')
+    remote = seal(
+        {
+            'id': 'remote-conflict-op',
+            'device_id': 'other-device',
+            'lamport': 1,
+            'entity': 'accounts',
+            'entity_id': account.id,
+            'op': 'upsert',
+            'payload': {
+                'changes': [
+                    {
+                        'table': 'accounts',
+                        'key': [account.id],
+                        'before': before,
+                        'after': after,
+                    }
+                ]
+            },
+            'created_at': '2026-10-30T12:00:00',
+        }
+    )
+    assert app.ledger.apply_remote_operation(remote) == 'conflict'
+    conflict = app.ledger.list_sync_conflicts()[0]
+
+    app._show_sync_conflicts()
+    from ui_helpers import click, find_by_key
+
+    find_by_key(app.page, f'sync-use-remote-{conflict["id"]}')
+    import asyncio
+
+    asyncio.run(click(app.page, f'sync-use-remote-{conflict["id"]}'))
+    assert [item.name for item in app.ledger.list_accounts()] == ['Remote name']

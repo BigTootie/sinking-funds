@@ -14,11 +14,12 @@ This is a Python savings-funds application built with Flet. It manages savings f
 Inspect the actual repository before making changes. Preserve the existing separation of responsibilities:
 - `src/app.py`: application initialization, startup flow, persistence coordination, and background synchronization.
 - `src/main.py`: resolves durable storage before importing modules that bind data paths.
-- `src/paths.py`: resolves `FLET_APP_STORAGE_DATA` (falling back to the working directory) and migrates legacy data.
+- `src/paths.py`: resolves the durable `FLET_APP_STORAGE_DATA` directory.
 - `src/ui/`: reusable pages, dialogs, cards, navigation, and presentation. `shared.py` holds cross-page dialogs; `transactions.py` holds the ledger register.
-- `src/ledger.py`: the single runtime SQLite database: accounts, transactions, funds, budget groups/allocations/history, contributions, settings, Nextcloud configuration/state, and the operation-log foundation.
-- `src/data.py`: one-time JSON migration, legacy import/export helpers, database backups, and schema helpers.
-- `src/nextcloud.py`: keyring-backed Nextcloud settings and the deferred WebDAV sync compatibility code.
+- `src/ledger.py`: the single runtime SQLite database: accounts, transactions, funds, budget groups/allocations/history, contributions, settings, Nextcloud configuration/state, operation log, cursors, and conflicts.
+- `src/data.py`: budget bridges, database backups, portable exports, and schema helpers.
+- `src/nextcloud.py`: keyring-backed Nextcloud settings and connectivity checks.
+- `src/sync/`: operation protocol, optional encryption, WebDAV/local providers, and sync engine.
 - `src/fund.py` and `src/budget.py`: models and pure calculations.
 - `src/utils.py`: money parsing/formatting; `src/colors.py`: shared styling.
 - `tests/`: offline model/persistence/sync/startup tests plus headless Flet UI tests.
@@ -28,17 +29,18 @@ Treat this list as guidance; the implementation in the repository is authoritati
 ## Data safety
 - Money is represented with `Decimal` in memory. Parse user input through `parse_money`.
 - Funds and budget categories have stable UUID identifiers. Do not key persistent behavior on names.
-- Persist runtime data through ledger.py SQLite transactions; JSON files are migration/import/export only.
+- Persist runtime data through ledger.py SQLite transactions. `ledger.db` is the only runtime data store; JSON files are explicit user import/export only.
+- Do not add support for legacy data files (`balance.txt`, `funds.json`, `budget.json`, `budget_history.json`, `nextcloud_sync.json`, or `sync_state.json`).
 - Preserve incompatible or damaged data by quarantining or backing it up before replacing it.
 - Never overwrite real user data during tests. Patch the data path constants to `tmp_path`.
 - Never hard-code credentials or log secrets. Nextcloud non-secret settings live in SQLite; the password lives in the OS keyring.
 - Budget periods roll over on startup. Archives live in the SQLite `budget_history` table.
-- The single SQLite database is local-only. Do not sync a live `ledger.db`; use database backup/export for portability. Multi-device operation-log sync is deferred to v0.5.
+- The single SQLite database is local-only. Do not sync a live `ledger.db`; use operation logs/snapshots or database backup/export for portability.
 
 ## Synchronization
-- Whole-file WebDAV sync is retired from the v0.4 runtime flow.
-- Nextcloud settings/state live in SQLite; the password remains in the OS keyring.
-- Multi-device operation-log sync is deferred to v0.5; do not sync a live SQLite file.
+- Sync uses the operation log and snapshots in `src/sync/`; never sync a live SQLite file.
+- Nextcloud settings/state live in SQLite; the password and optional encryption key live in the OS keyring.
+- Block conflicting edits until the user resolves them; do not silently overwrite either side.
 - Keep blocking network calls off the UI event loop and never log secrets.
 
 ## Implementation
@@ -57,7 +59,7 @@ Treat this list as guidance; the implementation in the repository is authoritati
 - Review the final diff for accidental changes, regressions, and exposed secrets.
 
 ## Releases
-- Release page titles use exactly the version tag, such as `v0.4.0`.
+- Release page titles use exactly the version tag, such as `v0.5.0`.
 - Squash-merge the release branch into `main`, tag `vX.Y.Z` on `main`, push
   both, and publish release notes from `CHANGELOG.md`.
 - After the merge is pushed, delete the merged development branch locally and

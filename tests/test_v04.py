@@ -19,9 +19,9 @@ def make_ledger(tmp_path):
 def test_schema_has_migration_metadata_and_single_database_tables(tmp_path):
     ledger = make_ledger(tmp_path)
 
-    assert ledger.get_meta('schema_version') == '2'
+    assert ledger.get_meta('schema_version') == '3'
     assert ledger.get_meta('device_id')
-    assert [row['version'] for row in ledger.get_migrations()] == [1, 2]
+    assert [row['version'] for row in ledger.get_migrations()] == [1, 2, 3]
     with ledger._connect() as connection:
         assert connection.execute('PRAGMA journal_mode').fetchone()[0] == 'wal'
         tables = {
@@ -41,114 +41,8 @@ def test_schema_has_migration_metadata_and_single_database_tables(tmp_path):
         'fund_contributions',
         'settings',
         'sync_ops',
+        'sync_conflicts',
     } <= tables
-
-
-def test_json_migration_imports_funds_budget_history_and_settings_once(
-    tmp_path, monkeypatch
-):
-    ledger = make_ledger(tmp_path)
-    funds_path = tmp_path / 'funds.json'
-    budget_path = tmp_path / 'budget.json'
-    history_path = tmp_path / 'budget_history.json'
-    balance_path = tmp_path / 'balance.txt'
-    monkeypatch.setattr(data, 'FUNDS_FILE', funds_path)
-    monkeypatch.setattr(data, 'BUDGET_FILE', budget_path)
-    monkeypatch.setattr(data, 'BUDGET_HISTORY_FILE', history_path)
-    monkeypatch.setattr(data, 'ACCOUNT_BALANCE_FILE', balance_path)
-
-    balance_path.write_text('500.00', encoding='utf-8')
-    funds_path.write_text(
-        json.dumps(
-            {
-                'version': 3,
-                'funds': [
-                    {
-                        'id': 'car-fund',
-                        'name': 'Car',
-                        'target': '2000.00',
-                        'balance': '250.00',
-                        'target_date': 'None',
-                        'recurring_transfer': '100.00',
-                        'due_day': 15,
-                        'kind': 'sinking_fund',
-                        'priority': 2,
-                    }
-                ],
-            }
-        ),
-        encoding='utf-8',
-    )
-    budget_path.write_text(
-        json.dumps(
-            {
-                'version': 3,
-                'period': '2026-10',
-                'categories': [
-                    {
-                        'id': 'income-id',
-                        'name': 'Paycheck',
-                        'budgeted': '4000.00',
-                        'spent': '4000.00',
-                        'kind': 'income',
-                    },
-                    {
-                        'id': 'rent-id',
-                        'name': 'Rent',
-                        'budgeted': '1200.00',
-                        'spent': '1200.00',
-                        'kind': 'expense',
-                    },
-                    {
-                        'id': 'car-budget-id',
-                        'name': 'Car contribution',
-                        'budgeted': '100.00',
-                        'spent': '0.00',
-                        'kind': 'expense',
-                        'source_fund_id': 'car-fund',
-                        'group': 'Savings',
-                    },
-                ],
-            }
-        ),
-        encoding='utf-8',
-    )
-    history_path.write_text(
-        json.dumps(
-            {
-                'version': 3,
-                'periods': [
-                    {
-                        'period': '2026-09',
-                        'archived_at': '2026-10-01T00:00:00',
-                        'categories': [],
-                    }
-                ],
-            }
-        ),
-        encoding='utf-8',
-    )
-
-    assert data.migrate_legacy_json_data(ledger) is True
-    assert data.migrate_legacy_json_data(ledger) is False
-
-    funds = ledger.list_funds()
-    assert len(funds) == 1
-    assert funds[0].name == 'Car'
-    assert funds[0].due_day == 15
-    assert funds[0].kind == 'sinking_fund'
-    assert funds[0].priority == 2
-    assert ledger.total_balance() == Decimal('500.00')
-    budget = ledger.load_budget('2026-10')
-    assert budget is not None
-    assert budget.to_be_budgeted == Decimal('2700.00')
-    assert [category.name for category in budget.categories] == [
-        'Paycheck',
-        'Rent',
-        'Car contribution',
-    ]
-    assert budget.categories[-1].group == 'Savings'
-    assert ledger.list_budget_history()[0]['period'] == '2026-09'
 
 
 def test_budget_groups_tbb_periods_and_copy_plan_forward(tmp_path):
@@ -299,7 +193,7 @@ def test_withdraw_fund_is_budget_excluded_and_does_not_change_bank_total(tmp_pat
     assert ledger.total_balance() == Decimal('500.00')
 
 
-def test_settings_and_operation_log_foundation(tmp_path):
+def test_settings_and_operation_log_capture(tmp_path):
     ledger = make_ledger(tmp_path)
 
     ledger.set_setting('theme_mode', 'light')
@@ -308,12 +202,12 @@ def test_settings_and_operation_log_foundation(tmp_path):
     ledger.delete_setting('theme_mode')
     assert ledger.get_setting('theme_mode') is None
 
-    operation_id = ledger.record_sync_op('fund', 'fund-id', 'update', {'name': 'Car'})
-    operations = ledger.list_sync_ops()
-    assert operations[0]['id'] == operation_id
-    assert operations[0]['entity'] == 'fund'
-    assert operations[0]['lamport'] == 1
-    assert json.loads(operations[0]['payload']) == {'name': 'Car'}
+    ledger.add_account('Checking', 'checking', '100')
+    operations = ledger.local_sync_ops()
+    assert len(operations) == 1
+    payload = json.loads(operations[0]['payload'])
+    tables = {change['table'] for change in payload['changes']}
+    assert {'accounts', 'transactions'} <= tables
 
 
 def test_invalid_contribution_is_rejected_without_mutating_fund(tmp_path):
@@ -342,19 +236,6 @@ def test_minor_unit_storage_is_exact_for_contributions(tmp_path):
     assert money_to_minor(contribution.amount) == 1
     assert ledger.get_fund(fund.id).balance == Decimal('0.01')
     assert ledger.total_balance() == Decimal('0.01')
-
-
-def test_deleted_budget_is_not_resurrected_by_legacy_import_migration(tmp_path):
-    path = tmp_path / 'ledger.db'
-    ledger = Ledger(path)
-    category = BudgetCategory('Groceries', 300, 50)
-    ledger.seed_legacy(None, [], [category], '2026-10')
-    assert ledger.load_budget('2026-10').categories
-
-    assert ledger.replace_budget('2026-10', []) is True
-    reopened = Ledger(path)
-
-    assert reopened.load_budget('2026-10').categories == []
 
 
 def test_ledger_json_export_round_trips_contributions_and_exclusions(tmp_path):

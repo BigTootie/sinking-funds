@@ -93,7 +93,7 @@ async def test_theme_toggle_persists_to_the_ledger(headless_app):
 async def test_ledger_json_import_restores_accounts_and_transactions(headless_app):
     app = headless_app.app
     page = headless_app.page
-    export = app.ledger.export_json(headless_app.paths['funds'].parent / 'ledger.json')
+    export = app.ledger.export_json(headless_app.paths['ledger'].parent / 'ledger.json')
     account = app.ledger.default_account()
     app.ledger.add_transaction(account.id, '2026-10-18', 'Temporary', amount='50')
     app.transactions_dashboard.refresh()
