@@ -103,7 +103,7 @@ class SavingsFundsApp:
         self.page.bgcolor = colors.BACKGROUND
         self.page.theme = colors.theme_for(self.theme_mode)
         self.page.scroll = None
-        self.page.on_resized = lambda e: self._resize_dashboard()
+        self.page.on_resize = lambda e: self._resize_dashboard()
         if isinstance(self.page, ft.Page):
             self.page.on_app_lifecycle_state_change = lambda e: (
                 self._check_period_rollover()

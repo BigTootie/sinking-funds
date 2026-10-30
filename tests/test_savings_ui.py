@@ -167,3 +167,16 @@ def test_savings_fund_cards_have_spacing_and_bounded_content():
     assert savings.content.width == 752
     assert savings.content.height == 710
     assert savings.content.content.scroll == ft.ScrollMode.AUTO
+
+
+async def test_window_resize_updates_savings_height(headless_app):
+    app = headless_app.app
+    page = headless_app.page
+
+    page.height = 1000
+    page.on_resize(None)
+    assert app.dashboard.content.height == 810
+
+    page.height = 1200
+    page.on_resize(None)
+    assert app.dashboard.content.height == 1010
