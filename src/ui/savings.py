@@ -524,9 +524,10 @@ class FundList:
             key='add-fund-button',
             on_click=self._add_fund,
         )
-        self.list_view = ft.Column(
+        self.list_view = ft.ReorderableListView(
             spacing=FUND_CARD_SPACING,
-            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            on_reorder=self._reorder,
+            scroll=ft.ScrollMode.HIDDEN,
         )
         self.control = ft.Column(
             [ft.Row([self.add_button], spacing=12), self.list_view],
@@ -539,23 +540,12 @@ class FundList:
     def _add_fund(self, e):
         self.dialog.add()
 
-    def move_fund(self, old_index: int, new_index: int):
-        self.funds.insert(new_index, self.funds.pop(old_index))
+    def _reorder(self, event):
+        self.funds.insert(event.new_index, self.funds.pop(event.old_index))
         self.on_changed()
 
-    def move_fund_to(self, source_id: str, target_id: str):
-        source_index = next(
-            (index for index, fund in enumerate(self.funds) if fund.id == source_id),
-            None,
-        )
-        target_index = next(
-            (index for index, fund in enumerate(self.funds) if fund.id == target_id),
-            None,
-        )
-        if source_index is None or target_index is None or source_index == target_index:
-            return
-        fund = self.funds.pop(source_index)
-        self.funds.insert(target_index, fund)
+    def move_fund(self, old_index: int, new_index: int):
+        self.funds.insert(new_index, self.funds.pop(old_index))
         self.on_changed()
 
     def _funds_changed(self):
@@ -579,28 +569,16 @@ class FundList:
             )
             for index, fund in enumerate(self.funds)
         ]
-        self.list_view.controls = [
-            ft.DragTarget(
-                group='savings-funds',
-                content=ft.Draggable(
-                    group='savings-funds',
-                    data=fund.id,
-                    axis=ft.Axis.VERTICAL,
-                    content=card.control,
-                    content_feedback=ft.Container(
-                        content=ft.Text(fund.name, weight=ft.FontWeight.W_600),
-                        padding=10,
-                        bgcolor=colors.SURFACE,
-                        border=ft.Border.all(1, colors.BLUE),
-                        border_radius=12,
-                    ),
-                ),
-                on_accept=lambda event, target=fund.id: self.move_fund_to(
-                    event.src.data, target
-                ),
+        self.list_view.controls = [card.control for card in self.cards]
+        self.list_view.height = (
+            sum(
+                DATED_FUND_CARD_HEIGHT
+                if fund.target_date is not None
+                else FUND_CARD_HEIGHT
+                for fund in self.funds
             )
-            for fund, card in zip(self.funds, self.cards, strict=False)
-        ]
+            + max(0, len(self.funds) - 1) * FUND_CARD_SPACING
+        )
 
 
 class Dashboard:
@@ -631,7 +609,6 @@ class Dashboard:
                 scroll=ft.ScrollMode.AUTO,
                 horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
             ),
-            width=760,
         )
         self.control = ft.Row(
             [self.content],
@@ -657,10 +634,6 @@ class Dashboard:
 
     def resize(self):
         screen_width = self.page.width or 0
-        screen_height = getattr(self.page, 'height', None) or 900
         margin = 12 if screen_width < 600 else 24
         self.content.width = min(760, max(screen_width - 2 * margin, 0))
-        self.content.height = max(300, screen_height - 190)
-        self.content.padding = ft.Padding.only(
-            left=margin, top=margin, right=margin, bottom=12
-        )
+        self.content.padding = margin

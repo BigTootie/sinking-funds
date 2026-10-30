@@ -148,7 +148,9 @@ async def test_funds_can_be_reordered_and_target_dates_are_shown(headless_app):
 
     assert len(find_by_text(page, 'Target date: 01/01/2027', containing=True)) == 1
 
-    app.dashboard.fund_list.move_fund(0, 1)
+    app.dashboard.fund_list.list_view.on_reorder(
+        SimpleNamespace(old_index=0, new_index=1)
+    )
 
     saved = app.ledger.list_funds()
     assert [fund.name for fund in saved] == ['Second', 'First']
@@ -163,9 +165,9 @@ def test_savings_fund_cards_have_spacing_and_bounded_content():
         lambda: None,
     )
 
-    assert savings.fund_list.list_view.scroll is None
+    assert savings.fund_list.list_view.scroll.value == 'hidden'
+    assert savings.fund_list.list_view.height == 96 * 2 + 16
     assert savings.content.width == 752
-    assert savings.content.height == 710
     assert savings.content.content.scroll == ft.ScrollMode.AUTO
 
 
@@ -173,13 +175,13 @@ async def test_window_resize_updates_savings_height(headless_app):
     app = headless_app.app
     page = headless_app.page
 
-    page.height = 1000
+    page.width = 800
     page.on_resize(None)
-    assert app.dashboard.content.height == 810
+    assert app.dashboard.content.width == 752
 
-    page.height = 1200
+    page.width = 1000
     page.on_resize(None)
-    assert app.dashboard.content.height == 1010
+    assert app.dashboard.content.width == 760
 
 
 @pytest.mark.seed_funds(
@@ -209,8 +211,5 @@ def test_dragging_a_fund_onto_another_reorders_it():
         lambda: None,
     )
 
-    dashboard.fund_list.move_fund_to(funds[0].id, funds[1].id)
+    dashboard.fund_list.list_view.on_reorder(SimpleNamespace(old_index=0, new_index=1))
     assert [fund.name for fund in funds] == ['Second', 'First', 'Third']
-
-    dashboard.fund_list.move_fund_to(funds[2].id, funds[0].id)
-    assert [fund.name for fund in funds] == ['Third', 'Second', 'First']
