@@ -16,9 +16,9 @@ Inspect the actual repository before making changes. Preserve the existing separ
 - `src/main.py`: resolves durable storage before importing modules that bind data paths.
 - `src/paths.py`: resolves `FLET_APP_STORAGE_DATA` (falling back to the working directory) and migrates legacy data.
 - `src/ui/`: reusable pages, dialogs, cards, navigation, and presentation. `shared.py` holds cross-page dialogs; `transactions.py` holds the ledger register.
-- `src/data.py`: atomic local persistence, backups, quarantine, schema loading, and budget history.
-- `src/ledger.py`: local SQLite accounts, transactions, transfers, and ledger import/export.
-- `src/nextcloud.py`: Nextcloud WebDAV, validation, reconciliation, conflict copies, and sync state.
+- `src/ledger.py`: the single runtime SQLite database: accounts, transactions, funds, budget groups/allocations/history, contributions, settings, Nextcloud configuration/state, and the operation-log foundation.
+- `src/data.py`: one-time JSON migration, legacy import/export helpers, database backups, and schema helpers.
+- `src/nextcloud.py`: keyring-backed Nextcloud settings and the deferred WebDAV sync compatibility code.
 - `src/fund.py` and `src/budget.py`: models and pure calculations.
 - `src/utils.py`: money parsing/formatting; `src/colors.py`: shared styling.
 - `tests/`: offline model/persistence/sync/startup tests plus headless Flet UI tests.
@@ -28,21 +28,18 @@ Treat this list as guidance; the implementation in the repository is authoritati
 ## Data safety
 - Money is represented with `Decimal` in memory. Parse user input through `parse_money`.
 - Funds and budget categories have stable UUID identifiers. Do not key persistent behavior on names.
-- Persist through the atomic write helpers in `data.py`; do not write data files directly.
+- Persist runtime data through ledger.py SQLite transactions; JSON files are migration/import/export only.
 - Preserve incompatible or damaged data by quarantining or backing it up before replacing it.
 - Never overwrite real user data during tests. Patch the data path constants to `tmp_path`.
-- Keep `nextcloud_sync.json` private. Store the Nextcloud password in the OS keyring when available, with the private-file fallback only when it is not. Never hard-code credentials or log secrets.
-- Budget periods roll over on startup. Archives belong in `budget_history.json`.
-- The ledger SQLite database is local-only. Do not sync a live `ledger.db`; use ledger JSON/CSV export for portability.
+- Never hard-code credentials or log secrets. Nextcloud non-secret settings live in SQLite; the password lives in the OS keyring.
+- Budget periods roll over on startup. Archives live in the SQLite `budget_history` table.
+- The single SQLite database is local-only. Do not sync a live `ledger.db`; use database backup/export for portability. Multi-device operation-log sync is deferred to v0.5.
 
 ## Synchronization
-- Keep blocking network calls off the UI event loop.
-- Fetch and validate every remote file before applying any of them.
-- Use content hashes and ETags to decide whether to download or upload.
-- Preserve conflicting remote copies instead of overwriting them silently.
-- Keep uploads serialized and debounced; avoid duplicate concurrent uploads for the same file.
-- A failed upload must remain local and be retried later; never drop it silently.
-- Missing remote files and offline startup must not prevent access to local data.
+- Whole-file WebDAV sync is retired from the v0.4 runtime flow.
+- Nextcloud settings/state live in SQLite; the password remains in the OS keyring.
+- Multi-device operation-log sync is deferred to v0.5; do not sync a live SQLite file.
+- Keep blocking network calls off the UI event loop and never log secrets.
 
 ## Implementation
 - Make focused, minimal changes.

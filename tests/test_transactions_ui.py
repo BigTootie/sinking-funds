@@ -30,7 +30,7 @@ async def test_ledger_account_and_transaction_flow(headless_app):
 
     assert app.ledger.total_balance() == Decimal('6250.00')
     assert len(find_by_text(page, 'Paycheck')) == 1
-    assert headless_app.paths['balance'].read_text(encoding='utf-8') == '6250.00'
+    assert app.ledger.total_balance() == Decimal('6250.00')
 
     transaction = app.ledger.list_transactions(search='Paycheck')[0]
     await click(page, f'transaction-{transaction.id}')

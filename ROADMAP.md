@@ -568,6 +568,26 @@ release target is native Flet packages for supported platforms. See
 
 **Goal:** a real zero-based budget with deep savings goals and safe auto-posting.
 
+**v0.4.0 branch status (2026-10-29):**
+
+- [x] One SQLite database for ledger, funds, budget groups/allocations/history,
+  settings, Nextcloud configuration/state, and the operation-log foundation.
+- [x] Category groups, per-month allocations, planned vs. actual, “to be
+  budgeted”, month navigation, copy-plan-forward, and archived history.
+- [x] Fund due day (1–31, month-end clamping), monthly contribution, priority,
+  kind/status, and on-track fields.
+- [x] Idempotent auto-post by `(fund_id, period)`, current-occurrence catch-up,
+  register visibility, overdraft for explicit destination accounts, and undo.
+- [x] One-off budget-excluded contributions.
+- [x] Legacy JSON is migration/import/export only; consistent SQLite backups.
+- [x] Operation-log table/design added; multi-device apply is deferred to v0.5.
+- [x] Whole-file Nextcloud sync retired from the runtime flow; settings/state
+  remain in SQLite pending sync v2.
+- [x] Transaction-level classification distinguishes savings, expense,
+  income, adjustments, and transfers.
+- [ ] Full reports UI/templates and transaction-to-fund allocation remain future
+  work.
+
 - Per-month allocations per category; category groups; "to be budgeted";
   rollover rules; overspending handling (cash first, credit later).
 - Month navigation, copy/plan next month, budget history UI, templates.

@@ -61,11 +61,6 @@ async def headless_app(tmp_path, monkeypatch, request):
     monkeypatch.setattr(nextcloud, 'BUDGET_HISTORY_FILE', history_path)
     monkeypatch.setattr(nextcloud, 'NEXTCLOUD_DATA_FILE', config_path)
     monkeypatch.setattr(nextcloud, 'SYNC_STATE_FILE', sync_state_path)
-    monkeypatch.setattr(app_module, 'ACCOUNT_BALANCE_FILE', balance_path)
-    monkeypatch.setattr(app_module, 'FUNDS_FILE', funds_path)
-    monkeypatch.setattr(app_module, 'BUDGET_FILE', budget_path)
-    monkeypatch.setattr(app_module, 'BUDGET_HISTORY_FILE', history_path)
-    monkeypatch.setattr(app_module, 'NEXTCLOUD_DATA_FILE', config_path)
     monkeypatch.setattr(settings_ui, 'ping_nextcloud_server', lambda _data: (True, ''))
 
     first_run = request.node.get_closest_marker('first_run') is not None

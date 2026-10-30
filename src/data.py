@@ -1,4 +1,9 @@
-"""Atomic local persistence for funds, budgets, and account balance."""
+"""Legacy import/export helpers, SQLite migrations, and database backups.
+
+The runtime source of truth is the single SQLite database managed by
+``ledger.py``. JSON and text helpers here exist for one-time migration,
+compatibility parsing, and explicit import/export.
+"""
 
 import json
 import os
@@ -457,6 +462,13 @@ def _fund_from_dict(item: dict, seen_ids: set[str]) -> Fund:
         target_date=_parse_target_date(item.get('target_date')),
         recurring_transfer=item.get('recurring_transfer', 0),
         fund_id=fund_id,
+        due_day=item.get('due_day', 31),
+        kind=item.get('kind', 'savings_goal'),
+        priority=item.get('priority', 0),
+        status=item.get('status', 'active'),
+        source_account_id=item.get('source_account_id'),
+        destination_account_id=item.get('destination_account_id'),
+        notes=item.get('notes', ''),
     )
 
 
@@ -487,6 +499,13 @@ def fund_to_dict(fund: Fund) -> dict:
         'balance': str(fund.balance),
         'target_date': fund.target_date_as_str(),
         'recurring_transfer': str(fund.recurring_transfer),
+        'due_day': fund.due_day,
+        'kind': fund.kind,
+        'priority': fund.priority,
+        'status': fund.status,
+        'source_account_id': fund.source_account_id,
+        'destination_account_id': fund.destination_account_id,
+        'notes': fund.notes,
     }
 
 
@@ -527,6 +546,9 @@ def _category_from_dict(
         kind=item.get('kind', 'expense'),
         source_fund_id=source_fund_id or None,
         category_id=category_id,
+        group=item.get('group', 'General'),
+        group_id=item.get('group_id'),
+        sort_order=item.get('sort_order', 0),
     )
 
 
@@ -555,7 +577,7 @@ def load_budget_from_json(funds: list[Fund] | None = None) -> BudgetState:
 
 
 def category_to_dict(category: BudgetCategory) -> dict:
-    item = {
+    item: dict[str, object] = {
         'id': category.category_id,
         'name': category.name,
         'budgeted': str(category.budgeted),
@@ -564,6 +586,11 @@ def category_to_dict(category: BudgetCategory) -> dict:
     }
     if category.source_fund_id is not None:
         item['source_fund_id'] = category.source_fund_id
+    if category.group != 'General':
+        item['group'] = category.group
+        item['group_id'] = category.group_id
+    if category.sort_order:
+        item['sort_order'] = category.sort_order
     return item
 
 
@@ -595,7 +622,17 @@ def parse_budget_history_text(text: str) -> list[dict]:
     return periods
 
 
-def load_budget_history() -> list[dict]:
+def _ledger_for(ledger=None):
+    if ledger is not None:
+        return ledger
+    from ledger import Ledger
+
+    return Ledger()
+
+
+def load_budget_history(ledger=None) -> list[dict]:
+    if ledger is not None:
+        return ledger.list_budget_history()
     text = _read_text(BUDGET_HISTORY_FILE)
     if text is None or not text.strip():
         return []
@@ -607,30 +644,39 @@ def load_budget_history() -> list[dict]:
         raise _corrupt(BUDGET_HISTORY_FILE, str(exc)) from None
 
 
-def save_budget_history(periods: list[dict]) -> bool:
+def save_budget_history(periods: list[dict], ledger=None) -> bool:
+    if ledger is not None:
+        changed = False
+        for snapshot in periods:
+            changed = ledger.save_budget_history(snapshot) or changed
+        return changed
     document = {'version': SCHEMA_VERSION, 'periods': periods}
     return atomic_write_text(BUDGET_HISTORY_FILE, json.dumps(document, indent=4) + '\n')
 
 
-def archive_budget(state: BudgetState) -> bool:
+def archive_budget(state: BudgetState, ledger=None) -> bool:
     """Archive a period snapshot, replacing any earlier snapshot for it.
 
     Replacing makes rollover and retry safe: if the budget save fails after the
     archive succeeds, the next attempt cannot create a duplicate period.
     """
-    periods = load_budget_history()
     snapshot = {
         'period': state.period,
         'archived_at': datetime.now().isoformat(timespec='seconds'),
         'categories': [category_to_dict(category) for category in state.categories],
     }
+    if ledger is not None:
+        return ledger.save_budget_history(snapshot)
+    periods = load_budget_history()
     periods = [period for period in periods if period.get('period') != state.period]
     periods.append(snapshot)
     periods.sort(key=lambda period: period.get('period', ''))
     return save_budget_history(periods)
 
 
-def rollover_budget(state: BudgetState, today: datetime | None = None) -> bool:
+def rollover_budget(
+    state: BudgetState, today: datetime | None = None, ledger=None
+) -> bool:
     """Archive and reset a budget that belongs to an earlier month.
 
     The operation is idempotent: archives are keyed by period, and a clock that
@@ -641,17 +687,229 @@ def rollover_budget(state: BudgetState, today: datetime | None = None) -> bool:
         return False
     if state.period > new_period:
         return False
-    archive_budget(state)
+    archive_budget(state, ledger)
     for category in state.categories:
         category.reset_spent()
     state.period = new_period
     return True
 
 
-def reset_budget_period(state: BudgetState, today: datetime | None = None) -> bool:
+def reset_budget_period(
+    state: BudgetState, today: datetime | None = None, ledger=None
+) -> bool:
     """Archive the current snapshot and start over in the current month."""
-    archive_budget(state)
+    archive_budget(state, ledger)
     for category in state.categories:
         category.reset_spent()
     state.period = current_period(today)
     return True
+
+
+# ---------------------------------------------------------------------------
+# SQLite runtime repositories
+# ---------------------------------------------------------------------------
+
+
+def migrate_legacy_json_data(ledger=None, *, force: bool = False) -> bool:
+    """Import legacy JSON once; SQLite is the source of truth afterward."""
+    ledger = _ledger_for(ledger)
+    if not force and ledger.get_meta('legacy_json_migrated') == '1':
+        return False
+
+    balance = load_balance_from_txt()
+    funds = load_funds_from_json()
+    budget = load_budget_from_json(funds)
+    history = load_budget_history()
+
+    legacy_sources = any(
+        path.exists()
+        for path in (
+            ACCOUNT_BALANCE_FILE,
+            FUNDS_FILE,
+            BUDGET_FILE,
+            BUDGET_HISTORY_FILE,
+        )
+    )
+    already_seeded = ledger.get_meta('legacy_seeded') == '1'
+    has_database_data = bool(
+        ledger.list_funds()
+        or ledger.list_accounts(include_archived=True)
+        or ledger.latest_budget_period()
+    )
+    if not already_seeded and not has_database_data and legacy_sources:
+        ledger.seed_legacy(balance, funds, budget.categories, budget.period)
+    elif not ledger.list_funds() and funds:
+        ledger.replace_funds(funds)
+    if history:
+        for snapshot in history:
+            ledger.save_budget_history(snapshot)
+    ledger.set_meta('legacy_json_migrated', '1')
+    return True
+
+
+def load_funds(ledger=None) -> list[Fund]:
+    ledger = _ledger_for(ledger)
+    if ledger.get_meta('legacy_json_migrated') != '1':
+        migrate_legacy_json_data(ledger)
+    return ledger.list_funds()
+
+
+def save_funds(funds: list[Fund], ledger=None) -> bool:
+    return _ledger_for(ledger).replace_funds(funds)
+
+
+def load_budget(period: str | None = None, ledger=None) -> BudgetState:
+    ledger = _ledger_for(ledger)
+    if ledger.get_meta('legacy_json_migrated') != '1':
+        migrate_legacy_json_data(ledger)
+    state = ledger.load_budget(period)
+    if state is None:
+        return BudgetState([], period or current_period())
+    return state
+
+
+def save_budget(state: BudgetState, ledger=None) -> bool:
+    return _ledger_for(ledger).replace_budget(state.period, state.categories)
+
+
+def copy_plan_forward(
+    source: BudgetState | None,
+    period: str,
+    ledger=None,
+) -> BudgetState:
+    """Copy planned amounts into a future month, clearing actual spending."""
+    ledger = _ledger_for(ledger)
+    if source is None:
+        source = ledger.load_budget()
+    if source is None:
+        return BudgetState([], period)
+    categories = []
+    for index, category in enumerate(source.categories):
+        copied = BudgetCategory(
+            category.name,
+            category.budgeted,
+            Decimal('0.00'),
+            category.kind,
+            category.source_fund_id,
+            category.category_id,
+            category.group,
+            category.group_id,
+            index,
+        )
+        categories.append(copied)
+    return BudgetState(categories, period)
+
+
+def budget_history_for(period: str, ledger=None) -> dict | None:
+    snapshot = next(
+        (item for item in load_budget_history(ledger) if item.get('period') == period),
+        None,
+    )
+    return snapshot
+
+
+# ---------------------------------------------------------------------------
+# Database backup / restore helpers
+# ---------------------------------------------------------------------------
+
+
+def database_backup_dir(ledger=None) -> Path:
+    ledger = _ledger_for(ledger)
+    directory = Path(ledger.path).parent / 'backups'
+    directory.mkdir(parents=True, exist_ok=True)
+    _set_private_permissions(directory, directory=True)
+    return directory
+
+
+def backup_database(ledger=None) -> Path:
+    """Create a consistent SQLite snapshot using SQLite's backup API."""
+    import sqlite3
+
+    ledger = _ledger_for(ledger)
+    destination = database_backup_dir(ledger) / f'database-{_timestamp()}.db'
+    source = sqlite3.connect(ledger.path)
+    try:
+        target = sqlite3.connect(destination)
+        try:
+            source.backup(target)
+        finally:
+            target.close()
+    finally:
+        source.close()
+    _set_private_permissions(destination)
+    return destination
+
+
+def latest_database_backup(ledger=None) -> Path | None:
+    ledger = _ledger_for(ledger)
+    candidates = sorted(database_backup_dir(ledger).glob('database-*.db'))
+    return candidates[-1] if candidates else None
+
+
+def restore_database(source: Path, ledger=None) -> Path:
+    """Validate and restore a database snapshot, preserving the current DB."""
+    import sqlite3
+
+    ledger = _ledger_for(ledger)
+    source = Path(source)
+    if not source.is_file():
+        raise ValueError('database backup does not exist')
+    probe = sqlite3.connect(source)
+    try:
+        integrity = probe.execute('PRAGMA integrity_check').fetchone()[0]
+        tables = {
+            row[0]
+            for row in probe.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+    finally:
+        probe.close()
+    if integrity != 'ok':
+        raise ValueError('database backup failed its integrity check')
+    if not {'accounts', 'transactions', 'funds', 'budget_allocations'} <= tables:
+        raise ValueError('database backup is not a Savings Funds database')
+    safety = backup_database(ledger)
+    ledger.path.parent.mkdir(parents=True, exist_ok=True)
+    source_connection = sqlite3.connect(source)
+    target_connection = sqlite3.connect(ledger.path)
+    try:
+        source_connection.backup(target_connection)
+        target_connection.execute('PRAGMA journal_mode = WAL')
+        target_connection.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+    finally:
+        target_connection.close()
+        source_connection.close()
+    return safety
+
+
+def export_database(destination: Path | None = None, ledger=None) -> Path:
+    """Export a consistent SQLite snapshot (including WAL contents)."""
+    import sqlite3
+
+    ledger = _ledger_for(ledger)
+    if destination is None:
+        export_dir = Path(ledger.path).parent / 'exports'
+        export_dir.mkdir(parents=True, exist_ok=True)
+        destination = export_dir / f'savings-funds-{_timestamp()}.db'
+    else:
+        destination = Path(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+    source = sqlite3.connect(ledger.path)
+    target = sqlite3.connect(destination)
+    try:
+        source.backup(target)
+    finally:
+        target.close()
+        source.close()
+    _set_private_permissions(destination)
+    return destination
+
+
+# Descriptive aliases used by integrations that prefer explicit storage names.
+load_funds_from_db = load_funds
+save_funds_to_db = save_funds
+load_budget_from_db = load_budget
+save_budget_to_db = save_budget
+load_budget_history_from_db = load_budget_history
+migrate_legacy_data = migrate_legacy_json_data

@@ -65,9 +65,18 @@ class AppHeader:
 class NextcloudConfigDialog:
     """Add or edit the saved Nextcloud connection using one shared form."""
 
-    def __init__(self, page: ft.Page, on_saved: Callable[[dict], None]):
+    def __init__(
+        self,
+        page: ft.Page,
+        on_saved: Callable[[dict], None],
+        *,
+        load_settings: Callable[[], dict | None] | None = None,
+        save_settings: Callable[[dict | None], bool] | None = None,
+    ):
         self.page = page
         self.on_saved = on_saved
+        self.load_settings = load_settings or load_nextcloud_sync_data
+        self.save_settings = save_settings or save_nextcloud_sync_data
 
     def add(self, on_complete: asyncio.Event):
         self._open(
@@ -76,7 +85,7 @@ class NextcloudConfigDialog:
 
     def modify(self):
         try:
-            initial = load_nextcloud_sync_data() or {}
+            initial = self.load_settings() or {}
         except (DataFileError, OSError) as exc:
             MessageDialog(self.page, 'Nextcloud settings', str(exc)).open()
             initial = {}
@@ -84,7 +93,7 @@ class NextcloudConfigDialog:
 
     def _persist(self, document: dict | None, error: ft.Text) -> bool:
         try:
-            save_nextcloud_sync_data(document)
+            self.save_settings(document)
         except OSError as exc:
             error.value = f'Could not save Nextcloud settings: {exc}'
             self.page.update()

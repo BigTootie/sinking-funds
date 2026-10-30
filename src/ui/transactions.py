@@ -588,8 +588,10 @@ class TransactionsDashboard:
                     border=ft.Border.only(bottom=ft.BorderSide(1, colors.BORDER)),
                     key=f'transaction-{transaction.id}',
                     ink=True,
-                    on_click=lambda e, item=transaction: self.transaction_dialog.open(
-                        item
+                    on_click=lambda e, item=transaction: (
+                        self._confirm_undo_contribution(item)
+                        if item.contribution_id
+                        else self.transaction_dialog.open(item)
                     ),
                 )
             )
@@ -604,6 +606,26 @@ class TransactionsDashboard:
                 )
             ]
         self.register.controls = rows
+
+    def _confirm_undo_contribution(self, transaction):
+        contribution_id = transaction.contribution_id
+
+        def undo():
+            if self.ledger.undo_fund_contribution(contribution_id):
+                self._changed()
+            else:
+                self.page.show_dialog(
+                    ft.SnackBar(ft.Text('That contribution was already undone.'))
+                )
+
+        ConfirmDialog(
+            self.page,
+            'Undo fund contribution?',
+            f'Remove "{transaction.payee}" from the register and restore the '
+            'fund balance?',
+            undo,
+            confirm_label='Undo',
+        ).open()
 
     def _import(self):
         path_input = ft.TextField(

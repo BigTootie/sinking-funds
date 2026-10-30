@@ -1,4 +1,9 @@
-"""Nextcloud WebDAV synchronization with conflict detection."""
+"""Nextcloud settings, keyring credentials, and the legacy WebDAV sync code.
+
+v0.4 stores connection settings and sync state in SQLite and no longer runs
+whole-file WebDAV synchronization from the app; operation-log sync lands in
+v0.5. The file-based helpers remain for migration and compatibility tests.
+"""
 
 import hashlib
 import json
@@ -388,6 +393,95 @@ def save_nextcloud_sync_data(nextcloud_sync_data: dict | None) -> bool:
             'be removed from the OS keyring.'
         )
     return changed
+
+
+def _database_ledger(ledger=None):
+    if ledger is not None:
+        return ledger
+    from ledger import Ledger
+
+    return Ledger()
+
+
+def load_nextcloud_sync_data_from_db(ledger=None) -> dict | None:
+    """Load Nextcloud settings from SQLite, with the password in the keyring."""
+    global _credential_warning
+    _reset_credential_warning()
+    store = _database_ledger(ledger)
+    raw = store.get_setting('nextcloud_config')
+    if not raw:
+        return None
+    try:
+        document = json.loads(raw)
+        if not isinstance(document, dict):
+            raise ValueError('expected an object')
+        required = ('base_url', 'username', 'data_path')
+        if any(not isinstance(document.get(key), str) for key in required):
+            raise ValueError('missing connection fields')
+        if not document['base_url'].strip() or not document['data_path'].strip():
+            raise ValueError('server URL and data path are required')
+        document['base_url'] = normalize_base_url(document['base_url'])
+    except (json.JSONDecodeError, TypeError, ValueError):
+        raise DataFileError(
+            Path('ledger.db'),
+            'Could not read the Nextcloud settings stored in the local database.',
+        ) from None
+    password = _keyring_get_password()
+    if password is None:
+        raise DataFileError(
+            Path('ledger.db'),
+            'Could not read the Nextcloud password from the OS keyring. '
+            'Re-enter the password in Settings.',
+        )
+    document['password'] = password
+    return document
+
+
+def save_nextcloud_sync_data_to_db(
+    nextcloud_sync_data: dict | None, ledger=None
+) -> bool:
+    """Store connection settings in SQLite; never store the password there."""
+    global _credential_warning
+    _reset_credential_warning()
+    store = _database_ledger(ledger)
+    previous = store.get_setting('nextcloud_config')
+    document = dict(nextcloud_sync_data or {})
+    password = document.pop('password', None)
+    if password is not None and not _keyring_set_password(password):
+        _credential_warning = KEYRING_UNAVAILABLE_WARNING
+    if document:
+        payload = json.dumps(document, indent=4, sort_keys=True) + '\n'
+        store.set_setting('nextcloud_config', payload)
+    else:
+        store.delete_setting('nextcloud_config')
+        if not _keyring_delete_password():
+            _credential_warning = (
+                'Nextcloud synchronization is disabled, but the password could '
+                'not be removed from the OS keyring.'
+            )
+    return previous != (store.get_setting('nextcloud_config') or None)
+
+
+def migrate_nextcloud_file_to_db(ledger=None) -> bool:
+    """Import the v0.3 settings file once, then never read it at runtime."""
+    store = _database_ledger(ledger)
+    if store.get_meta('nextcloud_file_migrated') == '1':
+        return False
+    if not NEXTCLOUD_DATA_FILE.exists():
+        store.set_meta('nextcloud_file_migrated', '1')
+        return False
+    try:
+        document = load_nextcloud_sync_data()
+    except (DataFileError, OSError):
+        store.set_meta('nextcloud_file_migrated', '1')
+        raise
+    if document is not None:
+        save_nextcloud_sync_data_to_db(document, store)
+    store.set_meta('nextcloud_file_migrated', '1')
+    # An existing file - including an empty one that explicitly disables
+    # synchronization - means the user has already seen the setup prompt.
+    store.set_meta('nextcloud_prompted', '1')
+    return True
 
 
 def reconcile_file(

@@ -19,6 +19,13 @@ from utils import money_format, parse_money, parse_signed_money
 BUDGET_ROW_HEIGHT = 58
 
 
+def shift_period(period: str, months: int) -> str:
+    """Move a ``YYYY-MM`` period by a number of calendar months."""
+    year, month = (int(part) for part in period.split('-', 1))
+    index = year * 12 + (month - 1) + months
+    return f'{index // 12:04d}-{index % 12 + 1:02d}'
+
+
 class BudgetCategoryDialog:
     """Add, edit, or remove a monthly budget line."""
 
@@ -340,6 +347,8 @@ class BudgetDashboard:
         period: str | None = None,
         on_reset_month: Callable[[], None] | None = None,
         funds: list[Fund] | None = None,
+        on_period_changed: Callable[[str], None] | None = None,
+        on_copy_plan: Callable[[], None] | None = None,
     ):
         self.page = page
         self.categories = categories
@@ -347,6 +356,8 @@ class BudgetDashboard:
         self.on_categories_changed = on_categories_changed
         self.period = period or current_period()
         self.on_reset_month = on_reset_month
+        self.on_period_changed = on_period_changed
+        self.on_copy_plan = on_copy_plan
         self.dialog = BudgetCategoryDialog(page, categories, self._categories_changed)
         self.adjustment_dialog = AmountAdjustmentDialog(page)
         self.summary = BudgetSummary()
@@ -387,11 +398,31 @@ class BudgetDashboard:
                 [
                     ft.Row(
                         [
+                            ft.IconButton(
+                                icon=ft.Icons.CHEVRON_LEFT,
+                                tooltip='Previous month',
+                                key='budget-prev-month',
+                                on_click=lambda e: self._shift_month(-1),
+                            ),
                             ft.Text(
                                 format_period(self.period),
                                 size=28,
                                 weight=ft.FontWeight.BOLD,
                                 expand=True,
+                            ),
+                            ft.IconButton(
+                                icon=ft.Icons.CHEVRON_RIGHT,
+                                tooltip='Next month',
+                                key='budget-next-month',
+                                on_click=lambda e: self._shift_month(1),
+                            ),
+                            ft.TextButton(
+                                'Copy plan',
+                                icon=ft.Icons.CONTENT_COPY_OUTLINED,
+                                key='copy-budget-plan-button',
+                                on_click=lambda e: (
+                                    self.on_copy_plan() if self.on_copy_plan else None
+                                ),
                             ),
                             ft.TextButton(
                                 'Reset month',
@@ -474,6 +505,15 @@ class BudgetDashboard:
             border=ft.Border.all(1, colors.BORDER),
             border_radius=16,
         )
+
+    def _shift_month(self, months: int):
+        period = shift_period(self.period, months)
+        if self.on_period_changed is not None:
+            self.on_period_changed(period)
+            return
+        self.period = period
+        self.refresh()
+        self.page.update()
 
     def _add_category(self, kind):
         self.dialog.add(kind)

@@ -11,6 +11,23 @@ from utils import parse_money, parse_signed_money
 
 
 @dataclass
+class BudgetGroup:
+    """A named section in the monthly plan, such as Giving or Savings."""
+
+    name: str
+    kind: str = 'expense'
+    group_id: str = field(default_factory=lambda: uuid4().hex)
+    sort_order: int = 0
+
+    def __post_init__(self):
+        self.name = self.name.strip()
+        if not self.name:
+            raise ValueError('Budget group name cannot be empty')
+        if self.kind not in {'income', 'expense'}:
+            self.kind = 'expense'
+
+
+@dataclass
 class BudgetCategory:
     name: str
     budgeted: Decimal
@@ -18,6 +35,9 @@ class BudgetCategory:
     kind: str = 'expense'
     source_fund_id: str | None = None
     category_id: str = field(default_factory=lambda: uuid4().hex)
+    group: str = 'General'
+    group_id: str | None = None
+    sort_order: int = 0
 
     def __post_init__(self):
         self.name = self.name.strip()
@@ -27,6 +47,7 @@ class BudgetCategory:
         self.spent = parse_signed_money(self.spent)
         if self.kind not in {'income', 'expense'}:
             self.kind = 'expense'
+        self.group = (self.group or 'General').strip() or 'General'
 
     @property
     def remaining(self) -> Decimal:
@@ -46,6 +67,67 @@ class BudgetCategory:
 class BudgetState:
     categories: list[BudgetCategory]
     period: str
+    groups: list[BudgetGroup] = field(default_factory=list)
+
+    @property
+    def planned_income(self) -> Decimal:
+        return sum(
+            (
+                category.budgeted
+                for category in self.categories
+                if category.kind == 'income'
+            ),
+            Decimal('0.00'),
+        )
+
+    @property
+    def planned_expenses(self) -> Decimal:
+        return sum(
+            (
+                category.budgeted
+                for category in self.categories
+                if category.kind == 'expense'
+            ),
+            Decimal('0.00'),
+        )
+
+    @property
+    def received_income(self) -> Decimal:
+        return sum(
+            (
+                category.spent
+                for category in self.categories
+                if category.kind == 'income'
+            ),
+            Decimal('0.00'),
+        )
+
+    @property
+    def actual_spending(self) -> Decimal:
+        return sum(
+            (
+                category.spent
+                for category in self.categories
+                if category.kind == 'expense'
+            ),
+            Decimal('0.00'),
+        )
+
+    @property
+    def to_be_budgeted(self) -> Decimal:
+        """Money planned as income that has not yet been assigned to expenses."""
+        return self.planned_income - self.planned_expenses
+
+    @property
+    def left_to_budget(self) -> Decimal:
+        """Alias used by the EveryDollar-style summary."""
+        return self.to_be_budgeted
+
+    def category(self, category_id: str) -> BudgetCategory | None:
+        return next(
+            (item for item in self.categories if item.category_id == category_id),
+            None,
+        )
 
 
 def current_period(today: datetime | None = None) -> str:
@@ -109,6 +191,7 @@ def sync_recurring_fund_expenses(
                 Decimal('0.00'),
                 'expense',
                 fund.id,
+                group='Savings',
             )
         )
         changed = True

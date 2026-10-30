@@ -55,14 +55,17 @@ async def test_settings_can_modify_nextcloud_configuration(headless_app):
     await enter(page, 'nextcloud-path-input', 'Savings')
     await click(page, 'nextcloud-save-button')
 
-    saved = json.loads(headless_app.paths['nextcloud'].read_text(encoding='utf-8'))
-    assert saved == {
+    stored = json.loads(app.ledger.get_setting('nextcloud_config'))
+    assert stored == {
         'base_url': 'cloud.example.test',
         'username': 'test-user',
-        'password': 'test-password',
         'data_path': 'Savings',
     }
-    assert app.nextcloud_sync_data == saved
+    assert 'test-password' not in app.ledger.get_setting('nextcloud_config')
+    assert app.nextcloud_sync_data == {
+        **stored,
+        'password': 'test-password',
+    }
     assert any(
         isinstance(dialog, ft.SnackBar)
         and 'keyring is unavailable' in dialog.content.value
@@ -83,7 +86,7 @@ async def test_settings_can_disable_nextcloud_sync(headless_app):
     await click(page, 'disable-nextcloud-button')
     await click(page, 'confirm-action-button')
 
-    assert json.loads(headless_app.paths['nextcloud'].read_text(encoding='utf-8')) == {}
+    assert app.ledger.get_setting('nextcloud_config') is None
     assert app.nextcloud_sync_data is None
     await click(page, 'settings-back-button')
     assert app.settings_view.control.visible is False

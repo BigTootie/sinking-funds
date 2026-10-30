@@ -17,34 +17,29 @@ from budget import (
     sync_recurring_fund_expenses,
 )
 from data import (
-    ACCOUNT_BALANCE_FILE,
-    BUDGET_FILE,
-    BUDGET_HISTORY_FILE,
-    FUNDS_FILE,
     DataFileError,
     UnsupportedSchemaError,
-    backup_all_files,
-    export_data,
-    latest_full_backup,
-    load_balance_from_txt,
-    load_budget_from_json,
-    load_funds_from_json,
+    backup_database,
+    copy_plan_forward,
+    export_database,
+    latest_database_backup,
+    load_budget,
+    load_funds,
+    migrate_legacy_json_data,
     reset_budget_period,
-    restore_backup,
+    restore_database,
     rollover_budget,
-    save_balance_to_txt,
-    save_budget_to_json,
-    save_funds_to_json,
+    save_budget,
+    save_funds,
 )
 from fund import Fund
 from ledger import Ledger, LedgerError
 from nextcloud import (
-    NEXTCLOUD_DATA_FILE,
     SyncConflictError,
     credential_storage_warning,
-    load_nextcloud_sync_data,
-    save_nextcloud_sync_data,
-    sync_data_from_nextcloud,
+    load_nextcloud_sync_data_from_db,
+    migrate_nextcloud_file_to_db,
+    save_nextcloud_sync_data_to_db,
     sync_data_to_nextcloud,
 )
 from paths import open_data_folder
@@ -52,7 +47,7 @@ from ui.budget import BudgetDashboard
 from ui.navigation import AppPageNavigation
 from ui.savings import Dashboard
 from ui.settings import AppHeader, NextcloudConfigDialog, SettingsView
-from ui.shared import AccountBalanceDialog, ConfirmDialog, LoadingDialog, MessageDialog
+from ui.shared import AccountBalanceDialog, ConfirmDialog, MessageDialog
 from ui.transactions import TransactionsDashboard
 
 logger = logging.getLogger(__name__)
@@ -62,13 +57,25 @@ NEXTCLOUD_SETUP_TIMEOUT_SECONDS = 600
 PERIOD_CHECK_SECONDS = 60
 
 
+def _next_period(period: str) -> str:
+    year, month = (int(part) for part in period.split('-', 1))
+    if month == 12:
+        return f'{year + 1:04d}-01'
+    return f'{year:04d}-{month + 1:02d}'
+
+
 class SavingsFundsApp:
     """Application state, persistence, synchronization, and UI composition."""
 
     def __init__(self, page: ft.Page):
         self.page = page
         self.ledger = Ledger()
-        self.theme_mode = self.ledger.get_meta('theme_mode', 'dark') or 'dark'
+        self.theme_mode = (
+            self.ledger.get_setting(
+                'theme_mode', self.ledger.get_meta('theme_mode', 'dark')
+            )
+            or 'dark'
+        )
         self.transactions_dashboard = None
         self.nextcloud_sync_data = None
         self.funds: list[Fund] = []
@@ -102,7 +109,12 @@ class SavingsFundsApp:
             )
 
         self.nextcloud_dialog = NextcloudConfigDialog(
-            self.page, self._on_nextcloud_config_saved
+            self.page,
+            self._on_nextcloud_config_saved,
+            load_settings=lambda: load_nextcloud_sync_data_from_db(self.ledger),
+            save_settings=lambda data: save_nextcloud_sync_data_to_db(
+                data, self.ledger
+            ),
         )
         self.header = AppHeader(self.show_settings)
         self.settings_view = SettingsView(
@@ -129,8 +141,42 @@ class SavingsFundsApp:
         )
 
     async def perform_nextcloud_sync(self):
-        """Synchronize at startup without preventing offline use."""
-        if not NEXTCLOUD_DATA_FILE.exists():
+        """Load Nextcloud settings from SQLite without blocking offline use.
+
+        v0.4 stores connection settings and sync state in the single local
+        database. Whole-file WebDAV synchronization is intentionally deferred
+        to the v0.5 operation-log sync work; no remote file is read or written
+        in this release.
+        """
+        try:
+            migrate_nextcloud_file_to_db(self.ledger)
+        except (DataFileError, OSError) as exc:
+            self.startup_errors.append(str(exc))
+
+        try:
+            self.nextcloud_sync_data = load_nextcloud_sync_data_from_db(self.ledger)
+        except (DataFileError, OSError) as exc:
+            self.startup_errors.append(str(exc))
+            self.nextcloud_sync_data = None
+
+        warning = credential_storage_warning()
+        if warning:
+            self.startup_notice = (
+                f'{self.startup_notice} {warning}' if self.startup_notice else warning
+            )
+        if self.nextcloud_sync_data:
+            notice = (
+                'Nextcloud settings are stored locally. Multi-device file sync '
+                'will return in v0.5.'
+            )
+            self.startup_notice = (
+                f'{self.startup_notice} {notice}' if self.startup_notice else notice
+            )
+            return
+
+        if self.ledger.get_meta('nextcloud_prompted') == '1':
+            return
+        if not self.ledger.get_setting('nextcloud_config'):
             self.sync_dialog_closed = asyncio.Event()
             self.nextcloud_dialog.add(self.sync_dialog_closed)
             try:
@@ -139,54 +185,13 @@ class SavingsFundsApp:
                     timeout=NEXTCLOUD_SETUP_TIMEOUT_SECONDS,
                 )
             except TimeoutError:
-                # Never let optional setup block offline access to local data.
                 self.startup_notice = (
                     'Nextcloud setup timed out; continuing with local data.'
                 )
                 with suppress(Exception):
                     self.page.pop_dialog()
-
-        try:
-            self.nextcloud_sync_data = load_nextcloud_sync_data()
-        except (DataFileError, OSError) as exc:
-            self.startup_errors.append(str(exc))
-            self.nextcloud_sync_data = None
-            return
-
-        warning = credential_storage_warning()
-        if warning:
-            self.startup_notice = (
-                f'{self.startup_notice} {warning}' if self.startup_notice else warning
-            )
-        if not self.nextcloud_sync_data:
-            return
-
-        loading_dialog = LoadingDialog(self.page, 'Syncing with Nextcloud...')
-        loading_dialog.open()
-        try:
-            result = await asyncio.to_thread(
-                sync_data_from_nextcloud, self.nextcloud_sync_data
-            )
-            for file_path in result.uploads:
-                self._sync_file_in_background(file_path)
-            for invalid_path in result.invalid_locals:
-                original_name = invalid_path.name.split('.corrupt-', 1)[0]
-                self.startup_errors.append(
-                    f'Local {original_name} could not be read. The damaged copy was '
-                    f'saved as {invalid_path.name}.'
-                )
-            for conflict_path in result.conflicts:
-                self.startup_errors.append(
-                    f'Nextcloud had a different copy of {conflict_path.name.rsplit(".remote-", 1)[0]}. '
-                    f'The remote copy was saved as {conflict_path.name}; local data was kept.'
-                )
-        except Exception as exc:
-            logger.exception('Startup Nextcloud sync failed')
-            self.startup_errors.append(
-                f'Nextcloud sync failed: {exc}. Local data is being used.'
-            )
-        finally:
-            self.page.pop_dialog()
+            finally:
+                self.ledger.set_meta('nextcloud_prompted', '1')
 
     def _sync_file_in_background(self, file_path: Path):
         if not self.nextcloud_sync_data:
@@ -281,7 +286,7 @@ class SavingsFundsApp:
 
     def _backup_data(self):
         try:
-            destination = backup_all_files()
+            destination = backup_database(self.ledger)
         except OSError as exc:
             self._show_snack(f'Could not create backup: {exc}', colors.RED)
             return
@@ -289,7 +294,7 @@ class SavingsFundsApp:
 
     def _export_data(self):
         try:
-            destination = export_data()
+            destination = export_database(ledger=self.ledger)
         except OSError as exc:
             self._show_snack(f'Could not export data: {exc}', colors.RED)
             return
@@ -303,12 +308,12 @@ class SavingsFundsApp:
 
     def _restore_latest_backup(self):
         try:
-            source = latest_full_backup()
+            source = latest_database_backup(self.ledger)
         except OSError as exc:
             self._show_snack(f'Could not find a backup: {exc}', colors.RED)
             return
         if source is None:
-            self._show_snack('No full backup is available to restore.', colors.RED)
+            self._show_snack('No database backup is available to restore.', colors.RED)
             return
 
         ConfirmDialog(
@@ -322,7 +327,7 @@ class SavingsFundsApp:
 
     def _perform_restore(self, source: Path):
         try:
-            restored = restore_backup(source)
+            restore_database(source, self.ledger)
         except (OSError, ValueError, DataFileError) as exc:
             MessageDialog(
                 self.page,
@@ -340,21 +345,20 @@ class SavingsFundsApp:
                 f'Restart Savings Funds to use the restored data. ({exc})',
             ).open()
             return
-        for path in restored:
-            self._sync_file_in_background(path)
         self._show_snack(f'Restored data from {source.name}.')
 
     def _reload_restored_data(self):
-        funds = load_funds_from_json()
-        budget = load_budget_from_json(funds)
-        balance = load_balance_from_txt()
+        funds = load_funds(self.ledger)
+        budget = load_budget(ledger=self.ledger)
 
         self.funds[:] = funds
         self.budget_categories[:] = budget.categories
         # Keep the dashboard's list object and the state's list in sync.
         budget.categories = self.budget_categories
         self.budget_state = budget
-        self.account_balance = balance
+        self.account_balance = (
+            self.ledger.total_balance() if self.ledger.list_accounts() else None
+        )
         self._writes_blocked = False
 
         if self.dashboard is not None:
@@ -385,7 +389,7 @@ class SavingsFundsApp:
     def _disable_nextcloud_sync(self):
         if (
             self._save_data(
-                lambda: save_nextcloud_sync_data(None),
+                lambda: save_nextcloud_sync_data_to_db(None, self.ledger),
                 'Nextcloud settings',
                 allow_when_blocked=True,
             )
@@ -407,47 +411,41 @@ class SavingsFundsApp:
         funds_loaded = True
         budget_loaded = True
         try:
-            self.funds = load_funds_from_json()
-        except (DataFileError, OSError) as exc:
+            migrate_legacy_json_data(self.ledger)
+        except (DataFileError, OSError, LedgerError) as exc:
+            self._record_load_error(exc)
+
+        try:
+            self.funds = load_funds(self.ledger)
+        except (DataFileError, OSError, LedgerError) as exc:
             self.funds = []
             funds_loaded = False
             self._record_load_error(exc)
 
         try:
-            self.budget_state = load_budget_from_json(
-                self.funds if funds_loaded else None
-            )
+            self.budget_state = load_budget(ledger=self.ledger)
             self.budget_categories = self.budget_state.categories
-        except (DataFileError, OSError) as exc:
+        except (DataFileError, OSError, LedgerError) as exc:
             self.budget_state = BudgetState([], current_period())
             self.budget_categories = self.budget_state.categories
             budget_loaded = False
             self._record_load_error(exc)
 
-        try:
-            self.account_balance = load_balance_from_txt()
-        except (DataFileError, OSError) as exc:
-            self.account_balance = None
-            self._record_load_error(exc)
-
         if funds_loaded and budget_loaded:
             self._normalize_and_rollover_data()
         else:
-            # Do not write incomplete state over files that failed to load.
+            # Do not write incomplete state over data that failed to load.
             self.startup_notice = None
 
-        had_balance = self.account_balance is not None
-        try:
-            self.ledger.seed_legacy(
-                self.account_balance,
-                self.funds,
-                self.budget_categories,
-                self.budget_state.period,
-            )
-            if had_balance:
-                self.account_balance = self.ledger.total_balance()
-        except (LedgerError, OSError) as exc:
-            self.startup_errors.append(f'Could not initialize the local ledger: {exc}')
+        balance_configured = self.ledger.get_setting(
+            'account_balance_set'
+        ) == '1' or bool(self.ledger.list_transactions())
+        self.account_balance = (
+            self.ledger.total_balance()
+            if self.ledger.list_accounts() and balance_configured
+            else None
+        )
+        self._auto_post_fund_contributions()
 
         if self.account_balance is None:
             dialog = AccountBalanceDialog(self.page, self.set_account_balance)
@@ -462,15 +460,15 @@ class SavingsFundsApp:
         previous_period = self.budget_state.period
         previous_categories = deepcopy(self.budget_state.categories)
         try:
-            if not rollover_budget(self.budget_state, today):
+            if not rollover_budget(self.budget_state, today, self.ledger):
                 return False
-        except (DataFileError, OSError) as exc:
+        except (DataFileError, OSError, LedgerError) as exc:
             self.startup_errors.append(str(exc))
             return False
 
         if (
             self._save_data(
-                lambda: save_budget_to_json(self.budget_state), 'budget.json'
+                lambda: save_budget(self.budget_state, self.ledger), 'budget plan'
             )
             is None
         ):
@@ -478,8 +476,6 @@ class SavingsFundsApp:
             self.budget_state.categories[:] = previous_categories
             return False
 
-        self._sync_file_in_background(BUDGET_FILE)
-        self._sync_file_in_background(BUDGET_HISTORY_FILE)
         if notify:
             self.startup_notice = (
                 f'Budget rolled over to {format_period(self.budget_state.period)}.'
@@ -492,39 +488,39 @@ class SavingsFundsApp:
         budget_changed = sync_recurring_fund_expenses(
             self.budget_categories, self.funds
         )
-        if budget_changed and self._save_data(
-            lambda: save_budget_to_json(self.budget_state), 'budget.json'
-        ):
-            self._sync_file_in_background(BUDGET_FILE)
+        if budget_changed:
+            self._save_data(
+                lambda: save_budget(self.budget_state, self.ledger), 'budget plan'
+            )
 
-        # Persist generated IDs and the versioned schema.  Unchanged files are
-        # left alone by the atomic writer.
-        if self._save_data(lambda: save_funds_to_json(self.funds), 'funds.json'):
-            self._sync_file_in_background(FUNDS_FILE)
-        if self._save_data(
-            lambda: save_budget_to_json(self.budget_state), 'budget.json'
-        ):
-            self._sync_file_in_background(BUDGET_FILE)
+        # Persist the current plan and fund definitions. The repositories skip
+        # writes when nothing changed.
+        self._save_data(lambda: save_funds(self.funds, self.ledger), 'funds')
+        self._save_data(
+            lambda: save_budget(self.budget_state, self.ledger), 'budget plan'
+        )
 
     def set_account_balance(self, value):
+        if self._writes_blocked:
+            self._show_snack(
+                'Writes are disabled because data was created by a newer '
+                'version of Savings Funds.',
+                colors.RED,
+            )
+            return
         try:
             self.ledger.set_total_balance(value)
         except LedgerError as exc:
             self._show_snack(f'Could not update the ledger: {exc}', colors.RED)
             return
+        self.ledger.set_setting('account_balance_set', '1')
         self.account_balance = self.ledger.total_balance()
-        if self._save_data(
-            lambda: save_balance_to_txt(self.account_balance), 'balance.txt'
-        ):
-            self._sync_file_in_background(ACCOUNT_BALANCE_FILE)
         self._refresh_ledger_view()
 
     def _on_ledger_changed(self):
+        self.ledger.set_setting('account_balance_set', '1')
         self.account_balance = self.ledger.total_balance()
-        if self._save_data(
-            lambda: save_balance_to_txt(self.account_balance), 'balance.txt'
-        ):
-            self._sync_file_in_background(ACCOUNT_BALANCE_FILE)
+        self.funds[:] = self.ledger.list_funds()
         self.refresh_page()
         self._refresh_ledger_view()
 
@@ -537,6 +533,7 @@ class SavingsFundsApp:
         if mode not in {'dark', 'light'}:
             return
         self.theme_mode = mode
+        self.ledger.set_setting('theme_mode', mode)
         self.ledger.set_meta('theme_mode', mode)
         self.page.theme_mode = (
             ft.ThemeMode.DARK if mode == 'dark' else ft.ThemeMode.LIGHT
@@ -552,6 +549,7 @@ class SavingsFundsApp:
             lambda: self.account_balance,
             self.set_account_balance,
             self._on_funds_changed,
+            self._on_fund_contribution,
         )
         self.budget_dashboard = BudgetDashboard(
             self.page,
@@ -560,6 +558,8 @@ class SavingsFundsApp:
             self.budget_state.period,
             self._reset_budget_month,
             self.funds,
+            self._load_budget_period,
+            self._copy_budget_plan,
         )
         self.transactions_dashboard = TransactionsDashboard(
             self.page, self.ledger, self._on_ledger_changed
@@ -616,7 +616,9 @@ class SavingsFundsApp:
     def _check_period_rollover(self):
         if self.dashboard is None:
             return False
-        if not self._rollover_budget_if_needed():
+        rolled = self._rollover_budget_if_needed()
+        self._auto_post_fund_contributions()
+        if not rolled:
             return False
         if self.budget_dashboard is not None:
             self.budget_dashboard.period = self.budget_state.period
@@ -627,30 +629,101 @@ class SavingsFundsApp:
         )
         return True
 
+    def _auto_post_fund_contributions(self, *, notify: bool = False) -> list:
+        if self._writes_blocked:
+            return []
+        try:
+            posted = self.ledger.auto_post_fund_contributions(self.funds)
+        except (LedgerError, OSError) as exc:
+            self.startup_errors.append(f'Could not auto-post fund contributions: {exc}')
+            return []
+        if not posted:
+            return []
+        self.funds[:] = self.ledger.list_funds()
+        self.account_balance = (
+            self.ledger.total_balance() if self.ledger.list_accounts() else None
+        )
+        if notify and self.dashboard is not None:
+            self._show_snack(
+                f'Posted {len(posted)} scheduled fund contribution'
+                f'{"s" if len(posted) != 1 else ""}.'
+            )
+        if self.dashboard is not None:
+            self.dashboard.refresh()
+        self._refresh_ledger_view()
+        return posted
+
     def _on_funds_changed(self):
-        changed = self._save_data(lambda: save_funds_to_json(self.funds), 'funds.json')
+        changed = self._save_data(lambda: save_funds(self.funds, self.ledger), 'funds')
         if changed is None:
             return
-        if changed:
-            self._sync_file_in_background(FUNDS_FILE)
         if sync_recurring_fund_expenses(self.budget_categories, self.funds):
             self._on_budget_categories_changed()
         self.refresh_page()
 
+    def _on_fund_contribution(self, fund, amount):
+        """Record a one-off, budget-excluded contribution from the savings card."""
+        try:
+            contribution = self.ledger.add_fund_contribution(
+                fund,
+                amount,
+                kind='one_off',
+                memo='One-off savings contribution',
+                allow_negative=True,
+            )
+        except (LedgerError, OSError, ValueError) as exc:
+            self._show_snack(f'Could not update the fund: {exc}', colors.RED)
+            return
+        if contribution is not None:
+            self.funds[:] = self.ledger.list_funds()
+        self.refresh_page()
+        self._refresh_ledger_view()
+
     def _on_budget_categories_changed(self):
-        changed = self._save_data(
-            lambda: save_budget_to_json(self.budget_state), 'budget.json'
+        self._save_data(
+            lambda: save_budget(self.budget_state, self.ledger), 'budget plan'
         )
-        if changed:
-            self._sync_file_in_background(BUDGET_FILE)
         if self.budget_dashboard is not None:
             self.budget_dashboard.refresh()
         self.page.update()
 
+    def _load_budget_period(self, period: str):
+        state = self.ledger.load_budget(period)
+        if not self.ledger.has_budget_period(period):
+            latest = self.ledger.load_budget()
+            state = copy_plan_forward(latest, period, self.ledger)
+            self._save_data(
+                lambda: save_budget(state, self.ledger),
+                'budget plan',
+                allow_when_blocked=True,
+            )
+        self.budget_state = state
+        self.budget_categories = state.categories
+        sync_recurring_fund_expenses(self.budget_categories, self.funds)
+        self._save_data(
+            lambda: save_budget(self.budget_state, self.ledger), 'budget plan'
+        )
+        if self.budget_dashboard is not None:
+            self.budget_dashboard.period = state.period
+            self.budget_dashboard.categories = self.budget_categories
+            self.budget_dashboard.dialog.categories = self.budget_categories
+            self.budget_dashboard.refresh()
+        self.page.update()
+
+    def _copy_budget_plan(self):
+        next_period = _next_period(self.budget_state.period)
+        copied = copy_plan_forward(self.budget_state, next_period, self.ledger)
+        self._save_data(
+            lambda: save_budget(copied, self.ledger),
+            'budget plan',
+            allow_when_blocked=True,
+        )
+        self._load_budget_period(next_period)
+
     def _reset_budget_month(self):
         if self._writes_blocked:
             self._show_snack(
-                'Writes are disabled because a data file was created by a newer '
+                'Writes are disabled because data was created by a newer '
                 'version of Savings Funds.',
                 colors.RED,
             )
@@ -658,21 +731,19 @@ class SavingsFundsApp:
         previous_period = self.budget_state.period
         previous_categories = deepcopy(self.budget_state.categories)
         try:
-            reset_budget_period(self.budget_state)
-        except (DataFileError, OSError) as exc:
+            reset_budget_period(self.budget_state, ledger=self.ledger)
+        except (DataFileError, OSError, LedgerError) as exc:
             self._show_snack(str(exc), colors.RED)
             return
         if (
             self._save_data(
-                lambda: save_budget_to_json(self.budget_state), 'budget.json'
+                lambda: save_budget(self.budget_state, self.ledger), 'budget plan'
             )
             is None
         ):
             self.budget_state.period = previous_period
             self.budget_state.categories[:] = previous_categories
             return
-        self._sync_file_in_background(BUDGET_FILE)
-        self._sync_file_in_background(BUDGET_HISTORY_FILE)
         if self.budget_dashboard is not None:
             self.budget_dashboard.period = self.budget_state.period
             self.budget_dashboard.refresh()

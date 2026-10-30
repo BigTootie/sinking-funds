@@ -6,21 +6,26 @@ or web app. See [`CHANGELOG.md`](CHANGELOG.md) for release notes.
 
 ## What it does
 
-- Track savings funds with a target, current balance, optional target date, and
-  recurring monthly contribution.
-- Track monthly income and expenses, including each item's expected/budgeted
-  amount and current received/spent amount.
-- Automatically include each nonzero fund contribution as a budget expense.
-  The generated expense follows the fund's contribution and is removed when the
-  contribution becomes zero or the fund is deleted.
-- Archive the budget at the end of each month and reset the spent amounts
-  automatically. A manual **Reset month** action archives the current snapshot
-  and starts the current month over.
-- Track accounts and transactions in a local SQLite ledger, including transfers,
-  cleared balances, search, filters, and undo after deletion.
+- Track savings funds (earmarks/envelopes rather than bank accounts) with a
+  target, balance, optional target date, priority, monthly contribution, and a
+  selectable monthly due day (1–31, clamped to the end of shorter months).
+- Track category-grouped monthly income and expenses with planned amounts,
+  actual/current amounts, “to be budgeted”, month navigation, plan copying, and
+  archived budget history.
+- Automatically post due recurring fund contributions once per calendar month.
+  Posting is idempotent per fund/period, catches up only the current occurrence,
+  is visible in the register, allows overdrafts for configured destination
+  accounts, and can be undone.
+- Record one-off fund contributions. They are savings transfers, visibly
+  budget-excluded, and do not reduce “to be budgeted”.
+- Track accounts and transactions in the same local SQLite database as funds and
+  budgets, including transfers, cleared balances, search, filters, and undo
+  after deletion.
 - Export ledger data as CSV or JSON and import a JSON ledger snapshot.
 - Switch between a blue-accented dark theme and a clean light theme in Settings.
-- Optionally synchronize account/fund/budget totals with Nextcloud.
+- Store Nextcloud connection settings and sync state locally. Multi-device
+  synchronization is deferred to v0.5 while the operation-log sync protocol is
+  built; v0.4 never reads or writes remote files.
 
 The bottom navigation opens Budget, Savings, and Transactions. The budget page
 uses a clean EveryDollar-inspired list with a right-side monthly summary. Fund
@@ -58,58 +63,50 @@ On startup the app copies any legacy data files from the project root into the
 configured data directory once, when the destination file does not already
 exist. Existing data always wins; migration never overwrites it.
 
-| File | Contents |
-| --- | --- |
-| `balance.txt` | Current account balance |
-| `funds.json` | Savings funds with stable IDs, targets, balances, dates, and contributions |
-| `budget.json` | Current budget period, income/expense items, and budgeted/current amounts |
-| `budget_history.json` | Archived budget periods created by rollover or manual reset |
-| `ledger.db` | Local SQLite accounts and transaction register |
-| `nextcloud_sync.json` | Nextcloud connection settings (password stored separately) |
-| `sync_state.json` | Last synchronized content hashes and ETags |
+**SQLite is the source of truth.** Accounts, transactions, funds, budget
+groups, per-month allocations, budget history, scheduled fund contributions,
+settings, Nextcloud configuration/state, and the operation-log foundation all
+live in one `ledger.db` file. Money is stored as integer minor units (cents) in
+SQLite and as `Decimal` in memory, so totals remain exact. Writes are
+transactional, WAL is enabled, and schema migrations are tracked in both
+`PRAGMA user_version` and a `migrations` table.
 
-The JSON files use schema version 3 and stable fund/category IDs. Older
-unversioned funds and budget files are still read automatically. Existing
-balances and budget/fund totals are imported once into the local ledger as a
-dated opening balance and migration records. New account balances are derived
-from ledger transactions.
+JSON and text files are **not runtime storage**. They may be present only as:
 
-Data is written atomically. Before a file is replaced, a rolling copy is kept in
-`backups/` (the ten most recent backups per file). Damaged files are never
-silently replaced: they are moved to a `*.corrupt-*` file, and the app reports
-the problem. Data files and the Nextcloud settings file use private
-permissions where the platform supports them.
+- one-time migration sources (`balance.txt`, `funds.json`, `budget.json`,
+  `budget_history.json`, and a legacy `nextcloud_sync.json`);
+- explicit import/export formats such as ledger JSON/CSV and database backups
+  or exports.
+
+After the first launch on v0.4, the app reads and writes only the database.
+Legacy files are left untouched rather than deleted.
+
+Backups use SQLite's consistent backup API and are written under `backups/` in
+the data directory. Export writes a portable `.db` snapshot. Damaged legacy
+files are still preserved as `*.corrupt-*` during migration instead of being
+silently replaced. Data files use private permissions where the platform
+supports them.
 
 The Nextcloud password is stored in the operating system keyring when one is
 available (Windows Credential Manager, macOS Keychain, or Linux Secret
-Service/KWallet). Existing plaintext passwords are migrated automatically.
-On systems without a keyring, the app falls back to the private
-`nextcloud_sync.json` file and shows a warning.
-
-When `nextcloud_sync.json` is present, synchronization is enabled until it is
-disabled from Settings. Local data remains usable when Nextcloud is offline.
+Service/KWallet). The connection URL, username, data path, and sync state are
+stored in SQLite; the password is never written to the database or logs. On
+systems without a keyring, the app keeps the non-secret settings but warns that
+the password cannot be saved until a keyring backend is available.
 
 ## Synchronization
 
-When configured, the app downloads the data files at startup and uploads local
-changes in the background. Every remote file is fetched and validated before
-any local file is changed, so a network or validation failure cannot leave a
-half-synced data set.
+v0.4 keeps the Nextcloud settings and sync-state storage in SQLite but **does
+not perform multi-device file synchronization**. The v0.3 whole-file WebDAV
+synchronizer is retired from the application flow because JSON files are no
+longer the runtime source of truth. The database includes an append-only
+`sync_ops` table and a per-device Lamport counter as the foundation for the v0.5
+operation-log protocol; v0.5 will add snapshots, replay, conflict resolution,
+and auto-post deduplication across devices. No live database file is ever
+uploaded to Nextcloud.
 
-A content hash plus the server's ETag determines which copy changed. If both
-copies changed, the remote copy is preserved as
-`<file>.remote-<timestamp>.conflict`, the local copy is kept, and the local copy
-is uploaded. Local files that cannot be read are preserved as
-`*.corrupt-*` before a valid remote copy is restored. If the remote file is
-missing, the app creates/uploads an empty file when both sides are empty, or
-uploads the existing local file.
-
-Uploads are debounced and serialized so a burst of edits sends each file once,
-in order, and a new edit made during an upload is sent afterward. A failed
-upload stays local and is retried after the next local change or the next app
-start. A remote conflict asks you to restart so the next startup can reconcile
-both copies. Disabling synchronization from Settings leaves all local data in
-place and stops further uploads.
+Local data remains fully usable offline. Disabling Nextcloud from Settings
+removes the saved connection settings and keyring password.
 
 ## Project structure
 
@@ -121,11 +118,18 @@ place and stops further uploads.
 - `src/ui/settings.py` contains the header and Nextcloud settings screen.
 - `src/ui/navigation.py` handles switching between pages.
 - `src/ui/shared.py` contains dialogs shared across pages.
-- `src/fund.py` and `src/budget.py` hold the savings and budget models.
-- `src/data.py` handles atomic persistence, backups, schema migration, and budget history.
-- `src/nextcloud.py` handles WebDAV, reconciliation, conflicts, and sync state.
+- `src/fund.py` and `src/budget.py` hold the savings, due-date, group, and
+  budget models.
+- `src/ledger.py` owns the single SQLite database: schema/migrations, accounts,
+  transactions, funds, per-month budget allocations, history, settings,
+  fund contributions, and the operation log.
+- `src/data.py` handles legacy JSON migration, import/export helpers, database
+  backups, and compatibility parsers.
+- `src/nextcloud.py` retains the legacy WebDAV implementation and provides
+  keyring-backed Nextcloud settings stored in SQLite.
 - `src/colors.py` and `src/utils.py` contain shared presentation and money helpers.
-- `tests/` contains model, persistence, synchronization, startup, and UI tests.
+- `tests/` contains model, SQLite migration, budget/fund, ledger, startup, and
+  headless UI tests.
 
 ## Tests and checks
 

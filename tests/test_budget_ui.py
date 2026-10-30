@@ -1,7 +1,5 @@
 """Headless tests for budget pages and recurring contributions."""
 
-import json
-
 import flet as ft
 import pytest
 from ui_helpers import (
@@ -42,18 +40,12 @@ async def test_budget_category_lifecycle_and_navigation(headless_app):
     find_by_key(page, card_key)
     assert len(find_by_text(page, '$350.00 spent this month')) == 1
     assert len(find_by_text(page, '$850.00')) == 1
-    saved = json.loads(headless_app.paths['budget'].read_text(encoding='utf-8'))
-    assert saved['period']
-    assert saved['categories'] == [
-        {
-            'id': app.budget_categories[0].category_id,
-            'name': 'Groceries',
-            'budgeted': '1200.00',
-            'spent': '350.00',
-            'kind': 'expense',
-        }
-    ]
-    assert headless_app.sync_requests[-1].name == 'budget.json'
+    saved = app.ledger.load_budget(app.budget_state.period)
+    assert saved.period
+    assert [
+        (category.name, str(category.budgeted), str(category.spent), category.kind)
+        for category in saved.categories
+    ] == [('Groceries', '1200.00', '350.00', 'expense')]
 
     await click(page, budget_action_key(app, 'Groceries', 'add'))
     await enter(page, 'balance-adjustment-amount', '50')
@@ -61,27 +53,22 @@ async def test_budget_category_lifecycle_and_navigation(headless_app):
     await click(page, budget_action_key(app, 'Groceries', 'remove'))
     await enter(page, 'balance-adjustment-amount', '20')
     await click(page, 'balance-adjustment-save')
-    saved = json.loads(headless_app.paths['budget'].read_text(encoding='utf-8'))
-    assert saved['categories'][0]['spent'] == '380.00'
-    assert saved['categories'][0]['budgeted'] == '1200.00'
+    saved = app.ledger.load_budget(app.budget_state.period)
+    assert saved.categories[0].spent == 380
+    assert saved.categories[0].budgeted == 1200
 
     await click(page, card_key)
     await enter(page, 'budget-category-spent-input', '400')
     await click(page, 'budget-category-save-button')
     assert len(find_by_text(page, '$400.00 spent this month')) == 1
-    saved = json.loads(headless_app.paths['budget'].read_text(encoding='utf-8'))
-    assert saved['categories'][0]['spent'] == '400.00'
+    saved = app.ledger.load_budget(app.budget_state.period)
+    assert saved.categories[0].spent == 400
 
     await click(page, card_key)
     await click(page, 'budget-category-delete-button')
     await click(page, 'confirm-action-button')
     find_by_key(page, card_key, count=0)
-    assert (
-        json.loads(headless_app.paths['budget'].read_text(encoding='utf-8'))[
-            'categories'
-        ]
-        == []
-    )
+    assert app.ledger.load_budget(app.budget_state.period).categories == []
 
     navigate(page, app, 1)
     assert visible_page(app, 0)
@@ -111,16 +98,11 @@ async def test_budget_income_totals_and_page_scrolling(headless_app):
     find_by_key(page, budget_key(app, 'Paycheck'))
     assert len(find_by_text(page, '$4,000.00 income this month')) == 1
     assert len(find_by_text(page, '$4,000.00 net cash flow')) == 1
-    saved = json.loads(headless_app.paths['budget'].read_text(encoding='utf-8'))
-    assert saved['categories'] == [
-        {
-            'id': app.budget_categories[0].category_id,
-            'name': 'Paycheck',
-            'budgeted': '4000.00',
-            'spent': '4000.00',
-            'kind': 'income',
-        }
-    ]
+    saved = app.ledger.load_budget(app.budget_state.period)
+    assert [
+        (category.name, str(category.budgeted), str(category.spent), category.kind)
+        for category in saved.categories
+    ] == [('Paycheck', '4000.00', '4000.00', 'income')]
 
     await click(page, budget_action_key(app, 'Paycheck', 'add'))
     await enter(page, 'balance-adjustment-amount', '100')
@@ -128,9 +110,9 @@ async def test_budget_income_totals_and_page_scrolling(headless_app):
     await click(page, budget_action_key(app, 'Paycheck', 'remove'))
     await enter(page, 'balance-adjustment-amount', '50')
     await click(page, 'balance-adjustment-save')
-    saved = json.loads(headless_app.paths['budget'].read_text(encoding='utf-8'))
-    assert saved['categories'][0]['spent'] == '4050.00'
-    assert saved['categories'][0]['budgeted'] == '4000.00'
+    saved = app.ledger.load_budget(app.budget_state.period)
+    assert saved.categories[0].spent == 4050
+    assert saved.categories[0].budgeted == 4000
 
 
 async def test_recurring_fund_contribution_generates_and_removes_budget_expense(
@@ -149,16 +131,24 @@ async def test_recurring_fund_contribution_generates_and_removes_budget_expense(
     navigate(page, app, 0)
     contribution_key = budget_key(app, 'Emergency contribution')
     find_by_key(page, contribution_key)
-    budget = json.loads(headless_app.paths['budget'].read_text(encoding='utf-8'))
-    assert budget['categories'] == [
-        {
-            'id': app.budget_categories[0].category_id,
-            'name': 'Emergency contribution',
-            'budgeted': '125.00',
-            'spent': '0.00',
-            'kind': 'expense',
-            'source_fund_id': app.funds[0].id,
-        }
+    budget = app.ledger.load_budget(app.budget_state.period)
+    assert [
+        (
+            category.name,
+            str(category.budgeted),
+            str(category.spent),
+            category.kind,
+            category.source_fund_id,
+        )
+        for category in budget.categories
+    ] == [
+        (
+            'Emergency contribution',
+            '125.00',
+            '0.00',
+            'expense',
+            app.funds[0].id,
+        )
     ]
 
     navigate(page, app, 1)
@@ -167,12 +157,7 @@ async def test_recurring_fund_contribution_generates_and_removes_budget_expense(
     await click(page, 'fund-save-button')
     navigate(page, app, 0)
     find_by_key(page, contribution_key, count=0)
-    assert (
-        json.loads(headless_app.paths['budget'].read_text(encoding='utf-8'))[
-            'categories'
-        ]
-        == []
-    )
+    assert app.ledger.load_budget(app.budget_state.period).categories == []
 
 
 @pytest.mark.seed_funds(
@@ -192,17 +177,17 @@ async def test_existing_fund_contribution_is_visible_on_budget_at_startup(headle
     page = headless_app.page
 
     find_by_key(page, budget_key(app, 'Car contribution'))
-    saved = json.loads(headless_app.paths['budget'].read_text(encoding='utf-8'))
-    assert saved['categories'] == [
-        {
-            'id': app.budget_categories[0].category_id,
-            'name': 'Car contribution',
-            'budgeted': '250.00',
-            'spent': '0.00',
-            'kind': 'expense',
-            'source_fund_id': app.funds[0].id,
-        }
-    ]
+    saved = app.ledger.load_budget(app.budget_state.period)
+    assert [
+        (
+            category.name,
+            str(category.budgeted),
+            str(category.spent),
+            category.kind,
+            category.source_fund_id,
+        )
+        for category in saved.categories
+    ] == [('Car contribution', '250.00', '0.00', 'expense', app.funds[0].id)]
 
 
 async def test_left_to_budget_uses_planned_amounts(headless_app):

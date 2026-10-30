@@ -12,7 +12,8 @@ import data
 import ledger
 import nextcloud
 from budget import BudgetCategory, BudgetState
-from nextcloud import SyncConflictError, SyncResult
+from fund import Fund
+from nextcloud import SyncConflictError
 
 SYNC_DATA = {
     'base_url': 'cloud.example.test',
@@ -57,16 +58,16 @@ def patch_app_paths(monkeypatch, tmp_path):
         'history': tmp_path / 'budget_history.json',
         'config': tmp_path / 'nextcloud_sync.json',
         'state': tmp_path / 'sync_state.json',
+        'database': tmp_path / 'ledger.db',
     }
-    for module in (data, nextcloud, app_module):
+    for module in (data, nextcloud):
         monkeypatch.setattr(module, 'ACCOUNT_BALANCE_FILE', paths['balance'])
         monkeypatch.setattr(module, 'FUNDS_FILE', paths['funds'])
         monkeypatch.setattr(module, 'BUDGET_FILE', paths['budget'])
         monkeypatch.setattr(module, 'BUDGET_HISTORY_FILE', paths['history'])
-    monkeypatch.setattr(ledger, 'LEDGER_DB', tmp_path / 'ledger.db')
+    monkeypatch.setattr(ledger, 'LEDGER_DB', paths['database'])
     monkeypatch.setattr(nextcloud, 'NEXTCLOUD_DATA_FILE', paths['config'])
     monkeypatch.setattr(nextcloud, 'SYNC_STATE_FILE', paths['state'])
-    monkeypatch.setattr(app_module, 'NEXTCLOUD_DATA_FILE', paths['config'])
     return paths
 
 
@@ -111,17 +112,10 @@ def seed_local_data(paths):
 
 
 @pytest.mark.asyncio
-async def test_startup_uses_local_data_when_nextcloud_is_unreachable(
-    monkeypatch, tmp_path
-):
+async def test_startup_migrates_legacy_json_into_sqlite(monkeypatch, tmp_path):
     paths = patch_app_paths(monkeypatch, tmp_path)
     seed_local_data(paths)
-    paths['config'].write_text(json.dumps(SYNC_DATA), encoding='utf-8')
-
-    def offline_sync(_sync_data):
-        raise nextcloud.requests.ConnectionError('offline')
-
-    monkeypatch.setattr(app_module, 'sync_data_from_nextcloud', offline_sync)
+    paths['config'].write_text('{}', encoding='utf-8')
 
     app = app_module.SavingsFundsApp(FakePage())
     app._sync_file_in_background = lambda _path: None
@@ -133,9 +127,9 @@ async def test_startup_uses_local_data_when_nextcloud_is_unreachable(
     assert [fund.name for fund in app.funds] == ['Emergency']
     assert [category.name for category in app.budget_categories] == ['Rent']
     assert app.dashboard is not None
-    assert any('Nextcloud sync failed' in error for error in app.startup_errors)
-    assert app.startup_notice is not None
-    assert 'keyring is unavailable' in app.startup_notice
+    assert paths['database'].is_file()
+    assert app.ledger.get_meta('legacy_json_migrated') == '1'
+    # Legacy files are migration sources, not the runtime destination.
     assert paths['balance'].read_text(encoding='utf-8') == '1234.50'
 
 
@@ -161,16 +155,16 @@ def test_rollover_restores_memory_when_the_budget_cannot_be_saved(
     app.budget_state = BudgetState([BudgetCategory('Groceries', 1200, 350)], '2026-09')
     app.budget_categories = app.budget_state.categories
 
-    def fail_to_save(_state):
+    def fail_to_save(_state, _ledger):
         raise OSError('disk full')
 
-    monkeypatch.setattr(app_module, 'save_budget_to_json', fail_to_save)
+    monkeypatch.setattr(app_module, 'save_budget', fail_to_save)
 
     assert app._rollover_budget_if_needed(datetime(2026, 10, 2)) is False
 
     assert app.budget_state.period == '2026-09'
     assert app.budget_state.categories[0].spent == Decimal('350.00')
-    assert any('Could not save budget.json' in error for error in app.startup_errors)
+    assert any('Could not save budget plan' in error for error in app.startup_errors)
 
 
 def test_newer_schema_disables_writes_instead_of_overwriting_the_file(
@@ -185,96 +179,48 @@ def test_newer_schema_disables_writes_instead_of_overwriting_the_file(
     app = app_module.SavingsFundsApp(FakePage())
 
     app.load_account_balance_and_funds()
-    app.set_account_balance(Decimal('50.00'))
 
     assert app._writes_blocked is True
     assert paths['funds'].read_text(encoding='utf-8') == original
-    assert paths['balance'].read_text(encoding='utf-8') == '1234.50'
     assert any('newer than supported' in error for error in app.startup_errors)
 
 
 def test_restore_reloads_the_running_app_state(monkeypatch, tmp_path):
     paths = patch_app_paths(monkeypatch, tmp_path)
     seed_local_data(paths)
-    backup = tmp_path / 'backup'
-    backup.mkdir()
-    (backup / 'balance.txt').write_text('999.00', encoding='utf-8')
-    (backup / 'funds.json').write_text(
-        json.dumps(
-            {
-                'version': 3,
-                'funds': [
-                    {
-                        'id': 'restored-fund',
-                        'name': 'Restored fund',
-                        'target': '1000.00',
-                        'balance': '250.00',
-                        'target_date': 'None',
-                        'recurring_transfer': '0.00',
-                    }
-                ],
-            }
-        ),
-        encoding='utf-8',
-    )
-    (backup / 'budget.json').write_text(
-        json.dumps(
-            {
-                'version': 3,
-                'period': '2026-10',
-                'categories': [
-                    {
-                        'id': 'restored-category',
-                        'name': 'Restored category',
-                        'budgeted': '100.00',
-                        'spent': '25.00',
-                        'kind': 'expense',
-                    }
-                ],
-            }
-        ),
-        encoding='utf-8',
-    )
-
     app = app_module.SavingsFundsApp(FakePage())
+    app.load_account_balance_and_funds()
+    backup = data.backup_database(app.ledger)
+
+    app.ledger.replace_funds([Fund('Changed', 100, fund_id='changed-fund')])
     app._perform_restore(backup)
 
-    assert app.account_balance == Decimal('999.00')
-    assert [fund.name for fund in app.funds] == ['Restored fund']
-    assert [category.name for category in app.budget_categories] == [
-        'Restored category'
-    ]
+    assert [fund.name for fund in app.funds] == ['Emergency']
+    assert [category.name for category in app.budget_categories] == ['Rent']
     assert app.budget_state.categories is app.budget_categories
 
 
 @pytest.mark.asyncio
-async def test_startup_sync_reports_conflicts_and_preserved_local_corruption(
+async def test_startup_imports_legacy_nextcloud_settings_without_network(
     monkeypatch, tmp_path
 ):
     paths = patch_app_paths(monkeypatch, tmp_path)
     seed_local_data(paths)
     paths['config'].write_text(json.dumps(SYNC_DATA), encoding='utf-8')
-    conflict = paths['funds'].with_name('funds.json.remote-20261026.conflict')
-    corrupt = paths['balance'].with_name('balance.txt.corrupt-20261026')
 
-    monkeypatch.setattr(
-        app_module,
-        'sync_data_from_nextcloud',
-        lambda _sync_data: SyncResult(
-            conflicts=[conflict], invalid_locals=[corrupt], uploads=[paths['budget']]
-        ),
-    )
+    def fail_network(_sync_data):
+        raise AssertionError('v0.4 must not perform WebDAV synchronization')
 
+    monkeypatch.setattr(app_module, 'sync_data_to_nextcloud', fail_network)
     app = app_module.SavingsFundsApp(FakePage())
-    sync_requests = []
-    app._sync_file_in_background = sync_requests.append
+    app._sync_file_in_background = lambda _path: None
 
     await app.perform_nextcloud_sync()
 
-    assert sync_requests == [paths['budget']]
-    assert any(conflict.name in error for error in app.startup_errors)
-    assert any(corrupt.name in error for error in app.startup_errors)
-    assert any('local data was kept' in error for error in app.startup_errors)
+    stored = json.loads(app.ledger.get_setting('nextcloud_config'))
+    assert stored['base_url'] == 'cloud.example.test'
+    assert 'password' not in stored
+    assert any('keyring' in error.lower() for error in app.startup_errors)
 
 
 def worker_app():

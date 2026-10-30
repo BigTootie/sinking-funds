@@ -1,8 +1,8 @@
 """Headless tests for savings-fund UI controls and persistence."""
 
 import asyncio
-import json
 from datetime import datetime
+from decimal import Decimal
 from types import SimpleNamespace
 
 import flet as ft
@@ -28,7 +28,7 @@ def test_fund_dialog_accepts_past_dates_and_can_clear_them():
     form = dialogs[0].content
     assert isinstance(form, ft.ListView)
     assert form.width == 320
-    assert form.height == 360
+    assert form.height == 420
     date_controls = form.controls[4]
     clear_button = date_controls.controls[1]
     assert clear_button.key == 'fund-date-clear'
@@ -46,7 +46,7 @@ async def test_first_run_skips_nextcloud_and_sets_account_balance(headless_app):
     await click(page, 'nextcloud-skip-button')
     await sync_task
 
-    assert json.loads(headless_app.paths['nextcloud'].read_text(encoding='utf-8')) == {}
+    assert app.ledger.get_setting('nextcloud_config') is None
 
     app.load_account_balance_and_funds()
     await click(page, 'account-balance-save')
@@ -56,8 +56,8 @@ async def test_first_run_skips_nextcloud_and_sets_account_balance(headless_app):
     await click(page, 'account-balance-save')
 
     assert len(find_by_text(page, '$1,234.50')) >= 1
-    assert headless_app.paths['balance'].read_text(encoding='utf-8') == '1234.50'
-    assert json.loads(headless_app.paths['nextcloud'].read_text(encoding='utf-8')) == {}
+    assert app.ledger.total_balance() == Decimal('1234.50')
+    assert app.ledger.get_setting('nextcloud_config') is None
 
 
 async def test_fund_add_modify_delete_validation_and_persistence(headless_app):
@@ -80,42 +80,40 @@ async def test_fund_add_modify_delete_validation_and_persistence(headless_app):
 
     card_key = f'fund-card-{app.funds[0].id}'
     find_by_key(page, card_key)
-    saved = json.loads(headless_app.paths['funds'].read_text(encoding='utf-8'))['funds']
-    assert saved[0]['name'] == 'Emergency'
-    assert saved[0]['balance'] == '100.00'
+    saved = app.ledger.list_funds()
+    assert saved[0].name == 'Emergency'
+    assert saved[0].balance == Decimal('100.00')
 
     await click(page, card_key)
     await enter(page, 'fund-balance-input', '350')
     await click(page, 'fund-save-button')
     assert len(find_by_text(page, '$350.00 allocated of $5,000.00')) == 1
-    saved = json.loads(headless_app.paths['funds'].read_text(encoding='utf-8'))['funds']
-    assert saved[0]['balance'] == '350.00'
+    saved = app.ledger.list_funds()
+    assert saved[0].balance == Decimal('350.00')
 
     await click(page, f'fund-add-{app.funds[0].id}')
     await enter(page, 'balance-adjustment-amount', '50')
     await click(page, 'balance-adjustment-save')
-    saved = json.loads(headless_app.paths['funds'].read_text(encoding='utf-8'))['funds']
-    assert saved[0]['balance'] == '400.00'
-    assert saved[0]['target'] == '1000.00'
+    saved = app.ledger.list_funds()
+    assert saved[0].balance == Decimal('400.00')
+    assert saved[0].target == Decimal('1000.00')
 
     await click(page, f'fund-remove-{app.funds[0].id}')
     await enter(page, 'balance-adjustment-amount', '25')
     await click(page, 'balance-adjustment-save')
-    saved = json.loads(headless_app.paths['funds'].read_text(encoding='utf-8'))['funds']
-    assert saved[0]['balance'] == '375.00'
-    assert saved[0]['target'] == '1000.00'
+    saved = app.ledger.list_funds()
+    assert saved[0].balance == Decimal('375.00')
+    assert saved[0].target == Decimal('1000.00')
 
     await click(page, card_key)
     await click(page, 'fund-delete-button')
     await click(page, 'confirm-action-button')
     find_by_key(page, card_key, count=0)
-    assert (
-        json.loads(headless_app.paths['funds'].read_text(encoding='utf-8'))['funds']
-        == []
-    )
+    assert app.ledger.list_funds() == []
 
 
 async def test_account_balance_can_be_modified(headless_app):
+    app = headless_app.app
     page = headless_app.page
 
     await click(page, 'savings-summary')
@@ -123,7 +121,7 @@ async def test_account_balance_can_be_modified(headless_app):
     await click(page, 'account-balance-save')
 
     assert len(find_by_text(page, '$7,500.00')) >= 1
-    assert headless_app.paths['balance'].read_text(encoding='utf-8') == '7500.00'
+    assert app.ledger.total_balance() == Decimal('7500.00')
 
 
 @pytest.mark.seed_funds(
@@ -153,5 +151,5 @@ async def test_funds_can_be_reordered_and_target_dates_are_shown(headless_app):
     list_view = app.dashboard.fund_list.list_view
     list_view.on_reorder(SimpleNamespace(old_index=0, new_index=1))
 
-    saved = json.loads(headless_app.paths['funds'].read_text(encoding='utf-8'))['funds']
-    assert [fund['name'] for fund in saved] == ['Second', 'First']
+    saved = app.ledger.list_funds()
+    assert [fund.name for fund in saved] == ['Second', 'First']

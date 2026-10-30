@@ -59,6 +59,18 @@ class FundDialog:
             keyboard_type=ft.KeyboardType.NUMBER,
             key='fund-recurring-input',
         )
+        due_day_input = ft.Dropdown(
+            label='Monthly due day (clamped to month end)',
+            value=str(fund.due_day if fund else 31),
+            options=[
+                ft.dropdown.Option(
+                    str(day),
+                    'Last day of month (31)' if day == 31 else str(day),
+                )
+                for day in range(1, 32)
+            ],
+            key='fund-due-day-input',
+        )
         target_date = fund.target_date if fund else None
         date_label = 'Target date: ' + (fund.target_date_as_str() if fund else 'None')
         error = ft.Text(color=colors.RED)
@@ -129,15 +141,31 @@ class FundDialog:
                 self.page.update()
                 return
 
+            try:
+                due_day = int(due_day_input.value or 31)
+            except (TypeError, ValueError):
+                error.value = 'Choose a due day between 1 and 31.'
+                self.page.update()
+                return
+
             if modifying:
                 fund.name = name
                 fund.set_target(target)
                 fund.set_balance(balance)
                 fund.set_target_date(target_date)
                 fund.set_recurring_transfer(recurring_transfer)
+                fund.set_due_day(due_day)
             else:
                 self.funds.insert(
-                    0, Fund(name, target, balance, target_date, recurring_transfer)
+                    0,
+                    Fund(
+                        name,
+                        target,
+                        balance,
+                        target_date,
+                        recurring_transfer,
+                        due_day=due_day,
+                    ),
                 )
             self.page.pop_dialog()
             self.on_changed()
@@ -194,9 +222,10 @@ class FundDialog:
                     balance_input,
                     recurring_input,
                     date_controls,
+                    due_day_input,
                     error,
                 ],
-                height=360,
+                height=420,
             ),
             actions=actions,
             modal=True,
@@ -299,12 +328,14 @@ class FundCard:
         fund_dialog: FundDialog,
         adjustment_dialog: AmountAdjustmentDialog,
         on_balance_changed: Callable[[], None],
+        on_contribution: Callable[[Fund, Decimal], None] | None = None,
     ):
         self.page = page
         self.fund = fund
         self.fund_dialog = fund_dialog
         self.adjustment_dialog = adjustment_dialog
         self.on_balance_changed = on_balance_changed
+        self.on_contribution = on_contribution
         self.icon_box = ft.Container(
             content=ft.Icon(ft.Icons.SHIELD, size=24),
             bgcolor=colors.SURFACE,
@@ -415,6 +446,17 @@ class FundCard:
         self.fund_dialog.modify(self.fund)
 
     def _adjust(self, direction):
+        if self.on_contribution is not None:
+            self.adjustment_dialog.open(
+                self.fund.name,
+                self.fund.balance,
+                direction,
+                lambda new_balance: self.on_contribution(
+                    self.fund, new_balance - self.fund.balance
+                ),
+            )
+            return
+
         def save(new_balance):
             self.fund.set_balance(new_balance)
             self.on_balance_changed()
@@ -460,11 +502,16 @@ class FundList:
     """Reorderable fund cards and the add-fund action."""
 
     def __init__(
-        self, page: ft.Page, funds: list[Fund], on_changed: Callable[[], None]
+        self,
+        page: ft.Page,
+        funds: list[Fund],
+        on_changed: Callable[[], None],
+        on_contribution: Callable[[Fund, Decimal], None] | None = None,
     ):
         self.page = page
         self.funds = funds
         self.on_changed = on_changed
+        self.on_contribution = on_contribution
         self.dialog = FundDialog(page, funds, self._funds_changed)
         self.adjustment_dialog = AmountAdjustmentDialog(page)
         self.add_button = ft.OutlinedButton(
@@ -508,6 +555,7 @@ class FundList:
                 self.dialog,
                 self.adjustment_dialog,
                 self._balance_changed,
+                self.on_contribution,
             )
             for fund in self.funds
         ]
@@ -533,6 +581,7 @@ class Dashboard:
         get_account_balance: Callable[[], Decimal],
         on_account_balance_saved: Callable[[Decimal], None],
         on_funds_changed: Callable[[], None],
+        on_fund_contribution: Callable[[Fund, Decimal], None] | None = None,
     ):
         self.page = page
         self.funds = funds
@@ -542,7 +591,7 @@ class Dashboard:
             on_account_balance_saved,
             self._refresh_after_balance_change,
         )
-        self.fund_list = FundList(page, funds, on_funds_changed)
+        self.fund_list = FundList(page, funds, on_funds_changed, on_fund_contribution)
         self.content = ft.Container(
             content=ft.Column(
                 [self.summary.control, self.fund_list.control],
