@@ -211,3 +211,18 @@ async def test_left_to_budget_uses_planned_amounts(headless_app):
     await click(page, 'budget-category-save-button')
 
     assert len(find_by_text(page, '$2,750.00 left to budget')) == 2
+
+
+async def test_new_budget_items_are_appended_to_the_list(headless_app):
+    app = await open_budget(headless_app)
+    page = headless_app.page
+
+    for name in ('First', 'Second'):
+        await click(page, 'add-budget-expense-button')
+        await enter(page, 'budget-category-name-input', name)
+        await enter(page, 'budget-category-budget-input', '100')
+        await click(page, 'budget-category-save-button')
+
+    assert [category.name for category in app.budget_categories] == ['First', 'Second']
+    saved = app.ledger.load_budget(app.budget_state.period)
+    assert [category.name for category in saved.categories] == ['First', 'Second']

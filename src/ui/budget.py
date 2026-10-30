@@ -96,7 +96,7 @@ class BudgetCategoryDialog:
                 category.budgeted = budgeted
                 category.spent = spent
             else:
-                self.categories.insert(0, BudgetCategory(name, budgeted, spent, kind))
+                self.categories.append(BudgetCategory(name, budgeted, spent, kind))
             self.page.pop_dialog()
             self.on_changed()
 
