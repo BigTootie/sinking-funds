@@ -16,8 +16,8 @@ from ui.shared import (
 )
 from utils import money_format, parse_money, parse_signed_money
 
-FUND_CARD_HEIGHT = 108
-DATED_FUND_CARD_HEIGHT = 158
+FUND_CARD_HEIGHT = 96
+DATED_FUND_CARD_HEIGHT = 144
 FUND_CARD_SPACING = 16
 
 
@@ -368,7 +368,7 @@ class FundCard:
                 ),
                 self.progress_bar,
             ],
-            spacing=10,
+            spacing=8,
             expand=True,
         )
         self.target_date_text = None
@@ -395,7 +395,7 @@ class FundCard:
             content=self.card_content,
             border=ft.Border.all(1, colors.BORDER),
             border_radius=16,
-            padding=12,
+            padding=10,
             height=(
                 DATED_FUND_CARD_HEIGHT
                 if fund.target_date is not None
@@ -543,6 +543,21 @@ class FundList:
         self.funds.insert(new_index, self.funds.pop(old_index))
         self.on_changed()
 
+    def move_fund_to(self, source_id: str, target_id: str):
+        source_index = next(
+            (index for index, fund in enumerate(self.funds) if fund.id == source_id),
+            None,
+        )
+        target_index = next(
+            (index for index, fund in enumerate(self.funds) if fund.id == target_id),
+            None,
+        )
+        if source_index is None or target_index is None or source_index == target_index:
+            return
+        fund = self.funds.pop(source_index)
+        self.funds.insert(target_index, fund)
+        self.on_changed()
+
     def _funds_changed(self):
         self.on_changed()
 
@@ -564,7 +579,28 @@ class FundList:
             )
             for index, fund in enumerate(self.funds)
         ]
-        self.list_view.controls = [card.control for card in self.cards]
+        self.list_view.controls = [
+            ft.DragTarget(
+                group='savings-funds',
+                content=ft.Draggable(
+                    group='savings-funds',
+                    data=fund.id,
+                    axis=ft.Axis.VERTICAL,
+                    content=card.control,
+                    content_feedback=ft.Container(
+                        content=ft.Text(fund.name, weight=ft.FontWeight.W_600),
+                        padding=10,
+                        bgcolor=colors.SURFACE,
+                        border=ft.Border.all(1, colors.BLUE),
+                        border_radius=12,
+                    ),
+                ),
+                on_accept=lambda event, target=fund.id: self.move_fund_to(
+                    event.src.data, target
+                ),
+            )
+            for fund, card in zip(self.funds, self.cards, strict=False)
+        ]
 
 
 class Dashboard:

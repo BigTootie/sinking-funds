@@ -197,3 +197,20 @@ async def test_fund_actions_menu_reorders_funds(headless_app):
     await click(page, f'fund-move-down-{first}')
 
     assert [fund.name for fund in app.funds] == ['Second', 'First']
+
+
+def test_dragging_a_fund_onto_another_reorders_it():
+    funds = [Fund('First', 100), Fund('Second', 200), Fund('Third', 300)]
+    dashboard = Dashboard(
+        SimpleNamespace(width=800),
+        funds,
+        lambda: 1000,
+        lambda _balance: None,
+        lambda: None,
+    )
+
+    dashboard.fund_list.move_fund_to(funds[0].id, funds[1].id)
+    assert [fund.name for fund in funds] == ['Second', 'First', 'Third']
+
+    dashboard.fund_list.move_fund_to(funds[2].id, funds[0].id)
+    assert [fund.name for fund in funds] == ['Third', 'Second', 'First']

@@ -88,6 +88,8 @@
   used.
 - Recalculate savings and budget layout dimensions on the actual Flet window
   resize event.
+- Compact fund cards and support drag-and-drop reordering plus move up/down
+  actions.
 - Show fund budget rows with the remaining amount needed to reach the fund goal
   instead of the confusing planned-vs-spent difference.
 - Lighten the dark theme to a neutral grey palette with blue accents.
