@@ -108,6 +108,18 @@ class WebDAVProvider:
             )
         return response.content
 
+    def _ensure_parent_dirs(self, path: str) -> None:
+        parent = path.rsplit('/', 1)[0] if '/' in path else ''
+        current = ''
+        for part in parent.split('/') if parent else []:
+            current = part if not current else f'{current}/{part}'
+            response = self._request('MKCOL', current)
+            if response.status_code not in (201, 405):
+                raise SyncProviderError(
+                    f'Could not prepare Nextcloud sync folder (HTTP '
+                    f'{response.status_code}).'
+                )
+
     def write_file(
         self,
         path: str,
@@ -116,6 +128,7 @@ class WebDAVProvider:
         if_match: str | None = None,
         create_only: bool = False,
     ) -> str | None:
+        self._ensure_parent_dirs(path)
         headers = {}
         if if_match:
             headers['If-Match'] = if_match

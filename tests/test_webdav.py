@@ -83,3 +83,16 @@ def test_server_errors_raise_provider_error(monkeypatch):
     )
     with pytest.raises(SyncProviderError):
         make_provider().read_file('manifest.json')
+
+
+def test_write_creates_the_device_folder_before_upload(monkeypatch):
+    calls = []
+
+    def request(method, url, **kwargs):
+        calls.append(method)
+        return SimpleNamespace(status_code=201, headers={})
+
+    monkeypatch.setattr('sync.webdav.requests.request', request)
+    make_provider().write_file('devices/device-a/ops.jsonl', b'data')
+
+    assert calls == ['MKCOL', 'MKCOL', 'PUT']
