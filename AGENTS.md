@@ -58,8 +58,10 @@ Treat this list as guidance; the implementation in the repository is authoritati
 
 ## Releases
 - Release page titles use exactly the version tag, such as `v0.4.0`.
-- Merge the release branch into `main`, tag `vX.Y.Z` on `main`, push both, and
-  publish release notes from `CHANGELOG.md`.
+- Squash-merge the release branch into `main`, tag `vX.Y.Z` on `main`, push
+  both, and publish release notes from `CHANGELOG.md`.
+- After the merge is pushed, delete the merged development branch locally and
+  from `origin`.
 
 ## Workflow
 1. Understand the requested behavior.
