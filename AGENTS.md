@@ -56,6 +56,11 @@ Treat this list as guidance; the implementation in the repository is authoritati
 - Do not claim a test passed unless you actually ran it.
 - Review the final diff for accidental changes, regressions, and exposed secrets.
 
+## Releases
+- Release page titles use exactly the version tag, such as `v0.4.0`.
+- Merge the release branch into `main`, tag `vX.Y.Z` on `main`, push both, and
+  publish release notes from `CHANGELOG.md`.
+
 ## Workflow
 1. Understand the requested behavior.
 2. Inspect the relevant code and identify affected files.

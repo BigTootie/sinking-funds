@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.0 — 2026-10-29
+## 0.4.0 — 2026-10-30
 
 ### Single-database storage
 
@@ -34,6 +34,8 @@
   explicit destination account is configured, and support undo.
 - Treat one-off fund contributions as budget-excluded savings transfers that do
   not reduce “to be budgeted”.
+- Present funds as compact cards with budget-style drag handles and direct
+  add/remove balance controls.
 - Add an append-only `sync_ops` table and per-device Lamport counter as the
   foundation for v0.5 synchronization.
 
