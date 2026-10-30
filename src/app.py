@@ -351,7 +351,7 @@ class SavingsFundsApp:
 
     def _reload_restored_data(self):
         funds = load_funds(self.ledger)
-        budget = load_budget(ledger=self.ledger)
+        budget = load_budget(current_period(), ledger=self.ledger)
 
         self.funds[:] = funds
         self.budget_categories[:] = budget.categories
@@ -439,7 +439,7 @@ class SavingsFundsApp:
             self._record_load_error(exc)
 
         try:
-            self.budget_state = load_budget(ledger=self.ledger)
+            self.budget_state = load_budget(current_period(), ledger=self.ledger)
             self.budget_categories = self.budget_state.categories
         except (DataFileError, OSError, LedgerError) as exc:
             self.budget_state = BudgetState([], current_period())

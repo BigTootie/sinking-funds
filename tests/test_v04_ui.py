@@ -77,6 +77,9 @@ async def test_budget_month_navigation_and_copy_plan(headless_app):
     assert app.budget_state.period == shift_period(current, 1)
     assert app.ledger.load_budget(shift_period(current, 1)) is not None
 
+    app._reload_restored_data()
+    assert app.budget_state.period == current
+
 
 async def test_fund_due_day_is_selectable_in_the_fund_dialog(headless_app):
     app = headless_app.app
