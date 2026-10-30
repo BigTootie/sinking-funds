@@ -123,11 +123,6 @@ def fund_key(app, name):
     return f'fund-card-{fund.id}'
 
 
-def fund_action_key(app, name, action):
-    fund = next(fund for fund in app.funds if fund.name == name)
-    return f'fund-{action}-{fund.id}'
-
-
 def budget_key(app, name):
     category = next(
         category for category in app.budget_categories if category.name == name

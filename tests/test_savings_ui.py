@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import flet as ft
 import pytest
-from ui_helpers import click, enter, find_by_key, find_by_text, navigate
+from ui_helpers import click, enter, find_by_key, find_by_text
 
 from fund import Fund
 from ui.savings import Dashboard, FundDialog
@@ -156,7 +156,7 @@ async def test_funds_can_be_reordered_and_target_dates_are_shown(headless_app):
     assert [fund.name for fund in saved] == ['Second', 'First']
 
 
-def test_savings_fund_cards_have_spacing_and_bounded_content():
+def test_savings_fund_cards_use_a_reorder_list_with_spacing():
     savings = Dashboard(
         SimpleNamespace(width=800),
         [Fund('Car', 1000), Fund('Trip', 2000)],
@@ -166,7 +166,8 @@ def test_savings_fund_cards_have_spacing_and_bounded_content():
     )
 
     assert savings.fund_list.list_view.scroll.value == 'hidden'
-    assert savings.fund_list.list_view.height == 96 * 2 + 16
+    assert savings.fund_list.list_view.spacing == 30
+    assert savings.fund_list.list_view.expand is True
     assert savings.content.width == 752
     assert savings.content.content.scroll == ft.ScrollMode.AUTO
 
@@ -182,23 +183,6 @@ async def test_window_resize_updates_savings_height(headless_app):
     page.width = 1000
     page.on_resize(None)
     assert app.dashboard.content.width == 760
-
-
-@pytest.mark.seed_funds(
-    [
-        {'name': 'First', 'target': 100, 'balance': 10, 'target_date': 'None'},
-        {'name': 'Second', 'target': 200, 'balance': 20, 'target_date': 'None'},
-    ]
-)
-async def test_fund_actions_menu_reorders_funds(headless_app):
-    app = headless_app.app
-    page = headless_app.page
-    navigate(page, app, 1)
-    first = app.funds[0].id
-
-    await click(page, f'fund-move-down-{first}')
-
-    assert [fund.name for fund in app.funds] == ['Second', 'First']
 
 
 def test_dragging_a_fund_onto_another_reorders_it():
