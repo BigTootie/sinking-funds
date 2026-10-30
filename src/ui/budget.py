@@ -387,6 +387,9 @@ class BudgetDashboard:
             'add-budget-expense-button',
             'expense',
         )
+        self.period_text = ft.Text(
+            format_period(self.period), size=28, weight=ft.FontWeight.BOLD, expand=True
+        )
         self.left_to_budget = ft.Text(size=16, weight=ft.FontWeight.W_600)
         self.left_column = ft.Column(
             [self.income_section, self.expense_section],
@@ -404,12 +407,7 @@ class BudgetDashboard:
                                 key='budget-prev-month',
                                 on_click=lambda e: self._shift_month(-1),
                             ),
-                            ft.Text(
-                                format_period(self.period),
-                                size=28,
-                                weight=ft.FontWeight.BOLD,
-                                expand=True,
-                            ),
+                            self.period_text,
                             ft.IconButton(
                                 icon=ft.Icons.CHEVRON_RIGHT,
                                 tooltip='Next month',
@@ -540,6 +538,7 @@ class BudgetDashboard:
         ).open()
 
     def refresh(self):
+        self.period_text.value = format_period(self.period)
         self.summary.refresh(self.categories, self.period)
         funds_by_id = {fund.id: fund for fund in self.funds}
         self.rows = [

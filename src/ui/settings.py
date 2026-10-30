@@ -214,6 +214,7 @@ class SettingsView:
         on_back: Callable,
         nextcloud_dialog: NextcloudConfigDialog,
         on_disable_sync: Callable[[], None] | None = None,
+        on_manual_sync: Callable[[], None] | None = None,
         on_backup: Callable[[], None] | None = None,
         on_export: Callable[[], None] | None = None,
         on_restore: Callable[[], None] | None = None,
@@ -224,6 +225,7 @@ class SettingsView:
         self.page = page
         self.nextcloud_dialog = nextcloud_dialog
         self.on_disable_sync = on_disable_sync
+        self.on_manual_sync = on_manual_sync
         self.on_backup = on_backup
         self.on_export = on_export
         self.on_restore = on_restore
@@ -269,24 +271,23 @@ class SettingsView:
             border_radius=14,
             key='appearance-settings-card',
         )
-        self.disable_sync_item = ft.PopupMenuItem(
-            content=ft.Text('Disable sync'),
+        self.manual_sync_button = ft.TextButton(
+            'Sync now',
+            icon=ft.Icons.SYNC,
+            key='manual-sync-button',
+            on_click=lambda e: self.on_manual_sync() if self.on_manual_sync else None,
+        )
+        self.disable_sync_button = ft.TextButton(
+            'Disable',
             icon=ft.Icons.CLOUD_OFF_OUTLINED,
             key='disable-nextcloud-button',
             on_click=self._confirm_disable_sync,
         )
-        nextcloud_trailing: list[ft.Control] = [
-            ft.Icon(ft.Icons.CHEVRON_RIGHT, color=colors.TEXT_SECONDARY)
-        ]
+        nextcloud_actions: list[ft.Control] = []
+        if self.on_manual_sync is not None:
+            nextcloud_actions.append(self.manual_sync_button)
         if self.on_disable_sync is not None:
-            nextcloud_trailing.insert(
-                0,
-                ft.PopupMenuButton(
-                    icon=ft.Icons.MORE_VERT,
-                    tooltip='Nextcloud actions',
-                    items=[self.disable_sync_item],
-                ),
-            )
+            nextcloud_actions.append(self.disable_sync_button)
         self.nextcloud_card = ft.Container(
             content=ft.Row(
                 [
@@ -328,9 +329,9 @@ class SettingsView:
                         key='nextcloud-settings-card',
                         on_click=self._modify_nextcloud,
                     ),
-                    *nextcloud_trailing,
+                    *nextcloud_actions,
                 ],
-                spacing=12,
+                spacing=8,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
             padding=16,
@@ -364,56 +365,45 @@ class SettingsView:
             ),
         )
         self.data_card = ft.Container(
-            content=ft.Column(
+            content=ft.Row(
                 [
-                    ft.Row(
-                        [
-                            ft.Container(
-                                content=ft.Icon(
-                                    ft.Icons.SAVE_OUTLINED, size=22, color=colors.BLUE
-                                ),
-                                bgcolor=colors.SURFACE,
-                                border_radius=10,
-                                padding=11,
-                            ),
-                            ft.Column(
-                                [
-                                    ft.Text(
-                                        'Data',
-                                        size=15,
-                                        weight=ft.FontWeight.W_600,
-                                    ),
-                                    ft.Text(
-                                        'Back up or move your local data. Credentials are excluded.',
-                                        size=12,
-                                        color=colors.TEXT_SECONDARY,
-                                    ),
-                                ],
-                                spacing=2,
-                                expand=True,
-                            ),
-                        ],
-                        spacing=12,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ft.Container(
+                        content=ft.Icon(
+                            ft.Icons.SAVE_OUTLINED, size=22, color=colors.BLUE
+                        ),
+                        bgcolor=colors.SURFACE,
+                        border_radius=10,
+                        padding=11,
                     ),
-                    ft.Row(
+                    ft.Column(
                         [
-                            self.backup_button,
-                            ft.PopupMenuButton(
-                                icon=ft.Icons.MORE_HORIZ,
-                                tooltip='More data actions',
-                                items=[
-                                    self.export_item,
-                                    self.restore_item,
-                                    self.open_folder_item,
-                                ],
+                            ft.Text(
+                                'Data',
+                                size=15,
+                                weight=ft.FontWeight.W_600,
+                            ),
+                            ft.Text(
+                                'Back up or move your local database.',
+                                size=12,
+                                color=colors.TEXT_SECONDARY,
                             ),
                         ],
-                        spacing=8,
-                        alignment=ft.MainAxisAlignment.END,
+                        spacing=2,
+                        expand=True,
+                    ),
+                    self.backup_button,
+                    ft.PopupMenuButton(
+                        icon=ft.Icons.MORE_HORIZ,
+                        tooltip='More data actions',
+                        items=[
+                            self.export_item,
+                            self.restore_item,
+                            self.open_folder_item,
+                        ],
                     ),
                 ],
-                spacing=12,
+                spacing=10,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
             padding=16,
             border=ft.Border.all(1, colors.BORDER),

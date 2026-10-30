@@ -16,7 +16,7 @@ from ui.shared import (
 )
 from utils import money_format, parse_money, parse_signed_money
 
-FUND_CARD_HEIGHT = 140
+FUND_CARD_HEIGHT = 120
 DATED_FUND_CARD_HEIGHT = 170
 
 
@@ -336,12 +336,6 @@ class FundCard:
         self.adjustment_dialog = adjustment_dialog
         self.on_balance_changed = on_balance_changed
         self.on_contribution = on_contribution
-        self.icon_box = ft.Container(
-            content=ft.Icon(ft.Icons.SHIELD, size=24),
-            bgcolor=colors.SURFACE,
-            border_radius=12,
-            padding=11,
-        )
         self.name_text = ft.Text(size=15, weight=ft.FontWeight.W_600)
         self.target_text = ft.Text(size=12)
         self.balance_text = ft.Text(size=16, weight=ft.FontWeight.BOLD)
@@ -353,7 +347,6 @@ class FundCard:
             [
                 ft.Row(
                     [
-                        self.icon_box,
                         ft.Column(
                             [self.name_text, self.target_text], spacing=4, expand=True
                         ),
@@ -435,8 +428,11 @@ class FundCard:
             border=ft.Border.all(1, colors.BORDER),
             border_radius=16,
             padding=16,
-            expand=True,
-            margin=ft.Margin.only(bottom=8),
+            height=(
+                DATED_FUND_CARD_HEIGHT
+                if fund.target_date is not None
+                else FUND_CARD_HEIGHT
+            ),
             key=f'fund-card-{fund.id}',
             on_click=self._edit,
         )

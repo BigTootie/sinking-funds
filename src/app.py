@@ -39,6 +39,7 @@ from nextcloud import (
     credential_storage_warning,
     load_nextcloud_sync_data_from_db,
     migrate_nextcloud_file_to_db,
+    ping_nextcloud_server,
     save_nextcloud_sync_data_to_db,
     sync_data_to_nextcloud,
 )
@@ -122,6 +123,7 @@ class SavingsFundsApp:
             self.show_dashboard,
             self.nextcloud_dialog,
             self._disable_nextcloud_sync,
+            self._manual_sync,
             self._backup_data,
             self._export_data,
             self._restore_latest_backup,
@@ -385,6 +387,20 @@ class SavingsFundsApp:
             self.settings_view.control.visible = True
         self.page.update()
         self._show_credential_warning()
+
+    async def _manual_sync(self):
+        if not self.nextcloud_sync_data:
+            self._show_snack('Configure Nextcloud before syncing.', colors.RED)
+            return
+        success, message = await asyncio.to_thread(
+            ping_nextcloud_server, self.nextcloud_sync_data
+        )
+        if success:
+            self._show_snack(
+                'Nextcloud connection OK. Multi-device data sync returns in v0.5.'
+            )
+        else:
+            self._show_snack(f'Nextcloud sync failed: {message}', colors.RED)
 
     def _disable_nextcloud_sync(self):
         if (

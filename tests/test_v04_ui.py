@@ -5,6 +5,7 @@ from decimal import Decimal
 import pytest
 from ui_helpers import click, enter, find_by_key, find_by_text, navigate
 
+from budget import format_period
 from ui.budget import shift_period
 
 
@@ -60,6 +61,7 @@ async def test_budget_month_navigation_and_copy_plan(headless_app):
     next_period = shift_period(current, 1)
     await click(page, 'budget-next-month')
     assert app.budget_state.period == next_period
+    assert len(find_by_text(page, format_period(next_period))) >= 2
     assert app.ledger.load_budget(next_period) is not None
     assert {category.name: category.budgeted for category in app.budget_categories} == {
         'Paycheck': 4000,

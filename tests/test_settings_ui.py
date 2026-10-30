@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import flet as ft
 from ui_helpers import click, enter, find_by_key, visible_page
 
+import app as app_module
 import ui.settings as settings_ui
 
 
@@ -111,3 +112,24 @@ def test_settings_data_buttons_invoke_backup_and_export_callbacks():
     view.open_folder_item.on_click(None)
 
     assert calls == ['backup', 'export', 'restore', 'open']
+
+
+async def test_nextcloud_card_offers_manual_sync(headless_app, monkeypatch):
+    app = headless_app.app
+    page = headless_app.page
+    app.nextcloud_sync_data = {
+        'base_url': 'cloud.example.test',
+        'username': 'test-user',
+        'password': 'test-password',
+        'data_path': 'Savings',
+    }
+    monkeypatch.setattr(app_module, 'ping_nextcloud_server', lambda _data: (True, ''))
+
+    await click(page, 'settings-button')
+    await click(page, 'manual-sync-button')
+
+    assert any(
+        isinstance(dialog, ft.SnackBar)
+        and 'Nextcloud connection OK' in dialog.content.value
+        for dialog in page.dialogs
+    )
