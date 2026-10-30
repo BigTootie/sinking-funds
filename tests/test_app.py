@@ -332,3 +332,19 @@ async def test_sync_worker_does_not_repeat_a_conflicted_upload(monkeypatch, tmp_
     assert set(app._sync_failed) == {'budget.json'}
     assert app._sync_pending == {}
     assert app.sync_errors == ['remote changed']
+
+
+def test_initialize_dashboard_forces_the_current_budget_month(monkeypatch, tmp_path):
+    paths = patch_app_paths(monkeypatch, tmp_path)
+    seed_local_data(paths)
+    paths['config'].write_text('{}', encoding='utf-8')
+    app = app_module.SavingsFundsApp(FakePage())
+    app.load_account_balance_and_funds()
+
+    app.budget_state.period = '2027-03'
+    app.initialize_dashboard()
+
+    from budget import current_period
+
+    assert app.budget_state.period == current_period()
+    assert app.budget_dashboard.period == current_period()

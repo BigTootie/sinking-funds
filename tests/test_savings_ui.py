@@ -165,5 +165,6 @@ def test_savings_fund_cards_have_spacing_and_bounded_content():
     )
 
     assert savings.fund_list.list_view.height == 120 * 2 + 16
-    assert savings.content.expand is True
+    assert savings.content.width == 752
+    assert savings.content.height == 570
     assert savings.content.content.scroll == ft.ScrollMode.AUTO

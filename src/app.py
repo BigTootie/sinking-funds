@@ -559,6 +559,10 @@ class SavingsFundsApp:
         self.page.update()
 
     def initialize_dashboard(self):
+        current = current_period()
+        if self.budget_state.period != current:
+            self.budget_state = load_budget(current, ledger=self.ledger)
+            self.budget_categories = self.budget_state.categories
         self.dashboard = Dashboard(
             self.page,
             self.funds,

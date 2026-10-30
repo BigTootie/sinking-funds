@@ -596,7 +596,6 @@ class Dashboard:
                 scroll=ft.ScrollMode.AUTO,
                 horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
             ),
-            expand=True,
         )
         self.control = ft.Row(
             [self.content],
@@ -622,6 +621,10 @@ class Dashboard:
 
     def resize(self):
         screen_width = self.page.width or 0
+        screen_height = getattr(self.page, 'height', None) or 900
         margin = 12 if screen_width < 600 else 24
         self.content.width = min(760, max(screen_width - 2 * margin, 0))
-        self.content.padding = margin
+        self.content.height = max(300, screen_height - 330)
+        self.content.padding = ft.Padding.only(
+            left=margin, top=margin, right=margin, bottom=12
+        )
