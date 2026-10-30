@@ -1,6 +1,7 @@
 """Application header and settings page controls."""
 
 import asyncio
+import inspect
 from collections.abc import Callable
 
 import flet as ft
@@ -275,7 +276,7 @@ class SettingsView:
             'Sync now',
             icon=ft.Icons.SYNC,
             key='manual-sync-button',
-            on_click=lambda e: self.on_manual_sync() if self.on_manual_sync else None,
+            on_click=self._run_manual_sync,
         )
         self.disable_sync_button = ft.TextButton(
             'Disable',
@@ -444,6 +445,13 @@ class SettingsView:
 
     def _modify_nextcloud(self, e):
         self.nextcloud_dialog.modify()
+
+    async def _run_manual_sync(self, _event):
+        if self.on_manual_sync is None:
+            return
+        result = self.on_manual_sync()
+        if inspect.isawaitable(result):
+            await result
 
     def _confirm_disable_sync(self, e):
         if self.on_disable_sync is None:

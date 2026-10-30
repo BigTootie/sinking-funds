@@ -1,5 +1,6 @@
 """Headless tests for settings and Nextcloud configuration."""
 
+import inspect
 import json
 from types import SimpleNamespace
 
@@ -126,6 +127,7 @@ async def test_nextcloud_card_offers_manual_sync(headless_app, monkeypatch):
     monkeypatch.setattr(app_module, 'ping_nextcloud_server', lambda _data: (True, ''))
 
     await click(page, 'settings-button')
+    assert inspect.iscoroutinefunction(find_by_key(page, 'manual-sync-button').on_click)
     await click(page, 'manual-sync-button')
 
     assert any(
