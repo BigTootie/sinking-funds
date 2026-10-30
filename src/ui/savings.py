@@ -16,8 +16,8 @@ from ui.shared import (
 )
 from utils import money_format, parse_money, parse_signed_money
 
-FUND_CARD_HEIGHT = 120
-DATED_FUND_CARD_HEIGHT = 170
+FUND_CARD_HEIGHT = 108
+DATED_FUND_CARD_HEIGHT = 158
 FUND_CARD_SPACING = 16
 
 
@@ -330,6 +330,9 @@ class FundCard:
         adjustment_dialog: AmountAdjustmentDialog,
         on_balance_changed: Callable[[], None],
         on_contribution: Callable[[Fund, Decimal], None] | None = None,
+        index: int = 0,
+        count: int = 1,
+        on_move: Callable[[int], None] | None = None,
     ):
         self.page = page
         self.fund = fund
@@ -337,6 +340,7 @@ class FundCard:
         self.adjustment_dialog = adjustment_dialog
         self.on_balance_changed = on_balance_changed
         self.on_contribution = on_contribution
+        self.index = index
         self.name_text = ft.Text(size=15, weight=ft.FontWeight.W_600)
         self.target_text = ft.Text(size=12)
         self.balance_text = ft.Text(size=16, weight=ft.FontWeight.BOLD)
@@ -357,52 +361,15 @@ class FundCard:
                             horizontal_alignment=ft.CrossAxisAlignment.END,
                             expand=True,
                         ),
-                        ft.Column(
-                            [
-                                ft.IconButton(
-                                    icon=ft.Icons.ADD,
-                                    icon_size=18,
-                                    width=30,
-                                    height=30,
-                                    size_constraints=ft.BoxConstraints(
-                                        min_width=30,
-                                        max_width=30,
-                                        min_height=30,
-                                        max_height=30,
-                                    ),
-                                    padding=0,
-                                    tooltip='Add to balance',
-                                    key=f'fund-add-{fund.id}',
-                                    on_click=lambda e: self._adjust(1),
-                                ),
-                                ft.IconButton(
-                                    icon=ft.Icons.REMOVE,
-                                    icon_size=18,
-                                    width=30,
-                                    height=30,
-                                    size_constraints=ft.BoxConstraints(
-                                        min_width=30,
-                                        max_width=30,
-                                        min_height=30,
-                                        max_height=30,
-                                    ),
-                                    padding=0,
-                                    tooltip='Remove from balance',
-                                    key=f'fund-remove-{fund.id}',
-                                    on_click=lambda e: self._adjust(-1),
-                                ),
-                            ],
-                            spacing=0,
-                        ),
+                        self._action_menu(index, count, on_move),
                     ],
                     spacing=12,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
                 self.progress_bar,
             ],
-            spacing=14,
+            spacing=10,
             expand=True,
-            margin=ft.Margin.only(right=22),
         )
         self.target_date_text = None
         self.on_track_status_text = None
@@ -428,7 +395,7 @@ class FundCard:
             content=self.card_content,
             border=ft.Border.all(1, colors.BORDER),
             border_radius=16,
-            padding=16,
+            padding=12,
             height=(
                 DATED_FUND_CARD_HEIGHT
                 if fund.target_date is not None
@@ -438,6 +405,45 @@ class FundCard:
             on_click=self._edit,
         )
         self.refresh()
+
+    def _action_menu(self, index: int, count: int, on_move):
+        items = [
+            ft.PopupMenuItem(
+                content=ft.Text('Add money'),
+                icon=ft.Icons.ADD,
+                key=f'fund-add-{self.fund.id}',
+                on_click=lambda e: self._adjust(1),
+            ),
+            ft.PopupMenuItem(
+                content=ft.Text('Remove money'),
+                icon=ft.Icons.REMOVE,
+                key=f'fund-remove-{self.fund.id}',
+                on_click=lambda e: self._adjust(-1),
+            ),
+        ]
+        if on_move is not None and index > 0:
+            items.append(
+                ft.PopupMenuItem(
+                    content=ft.Text('Move up'),
+                    icon=ft.Icons.ARROW_UPWARD,
+                    key=f'fund-move-up-{self.fund.id}',
+                    on_click=lambda e: on_move(index - 1),
+                )
+            )
+        if on_move is not None and index < count - 1:
+            items.append(
+                ft.PopupMenuItem(
+                    content=ft.Text('Move down'),
+                    icon=ft.Icons.ARROW_DOWNWARD,
+                    key=f'fund-move-down-{self.fund.id}',
+                    on_click=lambda e: on_move(index + 1),
+                )
+            )
+        return ft.PopupMenuButton(
+            icon=ft.Icons.MORE_VERT,
+            tooltip='Fund actions',
+            items=items,
+        )
 
     def _edit(self, e):
         self.fund_dialog.modify(self.fund)
@@ -552,8 +558,11 @@ class FundList:
                 self.adjustment_dialog,
                 self._balance_changed,
                 self.on_contribution,
+                index,
+                len(self.funds),
+                lambda new_index, source=index: self.move_fund(source, new_index),
             )
-            for fund in self.funds
+            for index, fund in enumerate(self.funds)
         ]
         self.list_view.controls = [card.control for card in self.cards]
 

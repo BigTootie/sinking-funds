@@ -10,7 +10,7 @@ import flet as ft
 import colors
 from ledger import Account, Ledger, LedgerError
 from paths import get_data_dir
-from ui.shared import ConfirmDialog, dialog_form
+from ui.shared import ConfirmDialog, dialog_form, show_snack
 from utils import money_format, parse_money, parse_signed_money
 
 ACCOUNT_TYPES = ['checking', 'savings', 'cash', 'credit']
@@ -119,9 +119,7 @@ class TransactionDialog:
     def open(self, transaction=None):
         accounts = self.ledger.list_accounts()
         if not accounts:
-            self.page.show_dialog(
-                ft.SnackBar(ft.Text('Add an account before recording a transaction.'))
-            )
+            show_snack(self.page, 'Add an account before recording a transaction.')
             return
         account_options = [ft.dropdown.Option(a.id, a.name) for a in accounts]
         transaction_date = ft.TextField(
@@ -263,14 +261,17 @@ class TransactionDialog:
     def _delete(self, transaction_id: str):
         deleted = self.ledger.delete_transaction(transaction_id)
         self.on_changed()
-        snack = ft.SnackBar(ft.Text('Transaction deleted.'), action='Undo')
 
         def undo(_event):
             self.ledger.restore_transactions(deleted)
             self.on_changed()
 
-        snack.on_action = undo
-        self.page.show_dialog(snack)
+        show_snack(
+            self.page,
+            'Transaction deleted.',
+            action='Undo',
+            on_action=undo,
+        )
 
 
 class TransactionsDashboard:
@@ -615,7 +616,7 @@ class TransactionsDashboard:
                 self._changed()
             else:
                 self.page.show_dialog(
-                    ft.SnackBar(ft.Text('That contribution was already undone.'))
+                    show_snack(self.page, 'That contribution was already undone.')
                 )
 
         ConfirmDialog(
@@ -670,8 +671,6 @@ class TransactionsDashboard:
             else:
                 path = self.ledger.export_json(destination / 'ledger.json')
         except (OSError, LedgerError) as exc:
-            self.page.show_dialog(
-                ft.SnackBar(ft.Text(f'Could not export: {exc}'), bgcolor=colors.RED)
-            )
+            show_snack(self.page, f'Could not export: {exc}', bgcolor=colors.RED)
             return
-        self.page.show_dialog(ft.SnackBar(ft.Text(f'Export created: {path}')))
+        show_snack(self.page, f'Export created: {path}')

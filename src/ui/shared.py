@@ -1,5 +1,6 @@
 """Controls shared by the savings, budget, and settings pages."""
 
+import asyncio
 from collections.abc import Callable
 from decimal import Decimal
 
@@ -7,6 +8,55 @@ import flet as ft
 
 import colors
 from utils import parse_money, parse_signed_money
+
+
+def show_snack(
+    page: ft.Page,
+    message: str,
+    *,
+    bgcolor=None,
+    action: str | None = None,
+    on_action: Callable | None = None,
+    duration_ms: int = 4000,
+) -> ft.SnackBar:
+    """Show a snackbar that reliably dismisses and supports an action."""
+    snack = ft.SnackBar(
+        ft.Text(message),
+        bgcolor=bgcolor,
+        action=action,
+        duration=duration_ms,
+        show_close_icon=True,
+    )
+
+    def dismiss():
+        if not snack.open:
+            return
+        dialogs = getattr(page, '_dialogs', None)
+        if (
+            dialogs is not None
+            and dialogs.controls
+            and dialogs.controls[-1] is not snack
+        ):
+            return
+        page.pop_dialog()
+
+    if on_action is not None:
+
+        def handle_action(event):
+            dismiss()
+            return on_action(event)
+
+        snack.on_action = handle_action
+
+    page.show_dialog(snack)
+    if isinstance(page, ft.Page):
+
+        async def close_later():
+            await asyncio.sleep(duration_ms / 1000 + 0.25)
+            dismiss()
+
+        page.run_task(close_later)
+    return snack
 
 
 def dialog_form(controls: list[ft.Control], *, height: int) -> ft.ListView:

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import flet as ft
 import pytest
-from ui_helpers import click, enter, find_by_key, find_by_text
+from ui_helpers import click, enter, find_by_key, find_by_text, navigate
 
 from fund import Fund
 from ui.savings import Dashboard, FundDialog
@@ -180,3 +180,20 @@ async def test_window_resize_updates_savings_height(headless_app):
     page.height = 1200
     page.on_resize(None)
     assert app.dashboard.content.height == 1010
+
+
+@pytest.mark.seed_funds(
+    [
+        {'name': 'First', 'target': 100, 'balance': 10, 'target_date': 'None'},
+        {'name': 'Second', 'target': 200, 'balance': 20, 'target_date': 'None'},
+    ]
+)
+async def test_fund_actions_menu_reorders_funds(headless_app):
+    app = headless_app.app
+    page = headless_app.page
+    navigate(page, app, 1)
+    first = app.funds[0].id
+
+    await click(page, f'fund-move-down-{first}')
+
+    assert [fund.name for fund in app.funds] == ['Second', 'First']

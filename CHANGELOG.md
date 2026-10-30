@@ -84,6 +84,8 @@
 - Add spacing between fund cards, bound savings scrolling, and fix budget
   summary clipping at the right edge.
 - Await the manual Nextcloud sync handler correctly.
+- Make snackbars dismiss automatically and close immediately when their action is
+  used.
 - Recalculate savings and budget layout dimensions on the actual Flet window
   resize event.
 - Show fund budget rows with the remaining amount needed to reach the fund goal

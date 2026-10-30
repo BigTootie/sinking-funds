@@ -48,7 +48,12 @@ from ui.budget import BudgetDashboard
 from ui.navigation import AppPageNavigation
 from ui.savings import Dashboard
 from ui.settings import AppHeader, NextcloudConfigDialog, SettingsView
-from ui.shared import AccountBalanceDialog, ConfirmDialog, MessageDialog
+from ui.shared import (
+    AccountBalanceDialog,
+    ConfirmDialog,
+    MessageDialog,
+    show_snack,
+)
 from ui.transactions import TransactionsDashboard
 
 logger = logging.getLogger(__name__)
@@ -250,7 +255,7 @@ class SavingsFundsApp:
         self._show_snack(message, colors.RED)
 
     def _show_snack(self, message: str, bgcolor=None):
-        self.page.show_dialog(ft.SnackBar(ft.Text(message), bgcolor=bgcolor))
+        show_snack(self.page, message, bgcolor=bgcolor)
 
     def _show_credential_warning(self):
         warning = credential_storage_warning()

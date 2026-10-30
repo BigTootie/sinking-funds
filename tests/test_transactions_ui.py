@@ -150,3 +150,25 @@ async def test_account_opening_and_edit_create_ledger_transactions(headless_app)
     await click(page, 'confirm-action-button')
     assert all(a.id != account.id for a in app.ledger.list_accounts())
     assert find_by_key(page, f'account-card-{account.id}', count=0) == []
+
+
+async def test_transaction_delete_snackbar_can_undo_and_dismiss(headless_app):
+    app = headless_app.app
+    page = headless_app.page
+    account = app.ledger.default_account()
+    transaction_id = app.ledger.add_transaction(
+        account.id, '2026-10-20', 'Temp', amount='-10'
+    )
+    app.transactions_dashboard.refresh()
+    navigate(page, app, 2)
+
+    await click(page, f'transaction-{transaction_id}')
+    await click(page, 'transaction-delete-button')
+    await click(page, 'confirm-action-button')
+
+    snack = next(dialog for dialog in page.dialogs if isinstance(dialog, ft.SnackBar))
+    snack.open = True
+    assert app.ledger.list_transactions(search='Temp') == []
+    snack.on_action(None)
+    assert app.ledger.list_transactions(search='Temp')[0].id == transaction_id
+    assert snack not in page.dialogs
