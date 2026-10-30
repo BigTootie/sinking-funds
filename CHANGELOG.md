@@ -81,6 +81,9 @@
   and transaction edits.
 - Treat the migrated default account as a Savings account instead of Checking.
 - Append newly created budget items to the end of their list.
+- Add spacing between fund cards, bound savings scrolling, and fix budget
+  summary clipping at the right edge.
+- Await the manual Nextcloud sync handler correctly.
 - Show fund budget rows with the remaining amount needed to reach the fund goal
   instead of the confusing planned-vs-spent difference.
 - Lighten the dark theme to a neutral grey palette with blue accents.

@@ -10,7 +10,7 @@ import pytest
 from ui_helpers import click, enter, find_by_key, find_by_text
 
 from fund import Fund
-from ui.savings import FundDialog
+from ui.savings import Dashboard, FundDialog
 
 
 def test_fund_dialog_accepts_past_dates_and_can_clear_them():
@@ -153,3 +153,17 @@ async def test_funds_can_be_reordered_and_target_dates_are_shown(headless_app):
 
     saved = app.ledger.list_funds()
     assert [fund.name for fund in saved] == ['Second', 'First']
+
+
+def test_savings_fund_cards_have_spacing_and_bounded_content():
+    savings = Dashboard(
+        SimpleNamespace(width=800),
+        [Fund('Car', 1000), Fund('Trip', 2000)],
+        lambda: 5000,
+        lambda _balance: None,
+        lambda: None,
+    )
+
+    assert savings.fund_list.list_view.height == 120 * 2 + 16
+    assert savings.content.expand is True
+    assert savings.content.content.scroll == ft.ScrollMode.AUTO

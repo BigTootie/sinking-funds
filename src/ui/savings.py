@@ -18,6 +18,7 @@ from utils import money_format, parse_money, parse_signed_money
 
 FUND_CARD_HEIGHT = 120
 DATED_FUND_CARD_HEIGHT = 170
+FUND_CARD_SPACING = 16
 
 
 class FundDialog:
@@ -518,7 +519,7 @@ class FundList:
             on_click=self._add_fund,
         )
         self.list_view = ft.ReorderableListView(
-            spacing=12,
+            spacing=FUND_CARD_SPACING,
             on_reorder=self._reorder,
             scroll=ft.ScrollMode.HIDDEN,
         )
@@ -563,7 +564,7 @@ class FundList:
                 else FUND_CARD_HEIGHT
                 for fund in self.funds
             )
-            + max(0, len(self.funds) - 1) * 12
+            + max(0, len(self.funds) - 1) * FUND_CARD_SPACING
         )
 
 
@@ -594,7 +595,8 @@ class Dashboard:
                 spacing=18,
                 scroll=ft.ScrollMode.AUTO,
                 horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-            )
+            ),
+            expand=True,
         )
         self.control = ft.Row(
             [self.content],

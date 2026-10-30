@@ -566,9 +566,10 @@ class BudgetDashboard:
         margin = 12 if width < 600 else 24
         self.content.width = min(1080, max(width - 2 * margin, 0))
         self.content.padding = margin
-        if self.content.width < 720:
-            self.left_column.width = self.content.width
+        inner_width = max(0, self.content.width - 2 * margin)
+        if inner_width < 720:
+            self.left_column.width = inner_width
             self.summary.control.visible = False
         else:
-            self.left_column.width = self.content.width - 340
+            self.left_column.width = inner_width - 340
             self.summary.control.visible = True
