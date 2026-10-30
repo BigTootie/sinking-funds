@@ -518,10 +518,9 @@ class FundList:
             key='add-fund-button',
             on_click=self._add_fund,
         )
-        self.list_view = ft.ReorderableListView(
+        self.list_view = ft.Column(
             spacing=FUND_CARD_SPACING,
-            on_reorder=self._reorder,
-            scroll=ft.ScrollMode.HIDDEN,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         )
         self.control = ft.Column(
             [ft.Row([self.add_button], spacing=12), self.list_view],
@@ -534,8 +533,8 @@ class FundList:
     def _add_fund(self, e):
         self.dialog.add()
 
-    def _reorder(self, e):
-        self.funds.insert(e.new_index, self.funds.pop(e.old_index))
+    def move_fund(self, old_index: int, new_index: int):
+        self.funds.insert(new_index, self.funds.pop(old_index))
         self.on_changed()
 
     def _funds_changed(self):
@@ -557,15 +556,6 @@ class FundList:
             for fund in self.funds
         ]
         self.list_view.controls = [card.control for card in self.cards]
-        self.list_view.height = (
-            sum(
-                DATED_FUND_CARD_HEIGHT
-                if fund.target_date is not None
-                else FUND_CARD_HEIGHT
-                for fund in self.funds
-            )
-            + max(0, len(self.funds) - 1) * FUND_CARD_SPACING
-        )
 
 
 class Dashboard:
@@ -596,6 +586,7 @@ class Dashboard:
                 scroll=ft.ScrollMode.AUTO,
                 horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
             ),
+            width=760,
         )
         self.control = ft.Row(
             [self.content],
@@ -624,7 +615,7 @@ class Dashboard:
         screen_height = getattr(self.page, 'height', None) or 900
         margin = 12 if screen_width < 600 else 24
         self.content.width = min(760, max(screen_width - 2 * margin, 0))
-        self.content.height = max(300, screen_height - 330)
+        self.content.height = max(300, screen_height - 190)
         self.content.padding = ft.Padding.only(
             left=margin, top=margin, right=margin, bottom=12
         )

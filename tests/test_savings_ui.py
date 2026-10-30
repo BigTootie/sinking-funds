@@ -148,8 +148,7 @@ async def test_funds_can_be_reordered_and_target_dates_are_shown(headless_app):
 
     assert len(find_by_text(page, 'Target date: 01/01/2027', containing=True)) == 1
 
-    list_view = app.dashboard.fund_list.list_view
-    list_view.on_reorder(SimpleNamespace(old_index=0, new_index=1))
+    app.dashboard.fund_list.move_fund(0, 1)
 
     saved = app.ledger.list_funds()
     assert [fund.name for fund in saved] == ['Second', 'First']
@@ -164,7 +163,7 @@ def test_savings_fund_cards_have_spacing_and_bounded_content():
         lambda: None,
     )
 
-    assert savings.fund_list.list_view.height == 120 * 2 + 16
+    assert savings.fund_list.list_view.scroll is None
     assert savings.content.width == 752
-    assert savings.content.height == 570
+    assert savings.content.height == 710
     assert savings.content.content.scroll == ft.ScrollMode.AUTO

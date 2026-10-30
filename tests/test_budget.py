@@ -220,9 +220,7 @@ def test_savings_page_uses_one_page_level_scroller():
         lambda: None,
     )
     assert savings.content.content.scroll.value == 'auto'
-    assert savings.fund_list.list_view.expand is None
-    assert savings.fund_list.list_view.scroll.value == 'hidden'
-    assert savings.fund_list.list_view.height == 120
+    assert savings.fund_list.list_view.scroll is None
 
 
 def test_fund_budget_row_shows_remaining_to_goal():
