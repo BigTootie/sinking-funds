@@ -75,7 +75,7 @@ async def test_settings_can_modify_nextcloud_configuration(headless_app):
 
     await click(page, 'settings-back-button')
     assert app.settings_view.control.visible is False
-    assert visible_page(app, 0) is True
+    assert visible_page(app, 1) is True
     find_by_key(page, 'add-fund-button')
 
 
@@ -91,7 +91,7 @@ async def test_settings_can_disable_nextcloud_sync(headless_app):
     assert app.nextcloud_sync_data is None
     await click(page, 'settings-back-button')
     assert app.settings_view.control.visible is False
-    assert visible_page(app, 0) is True
+    assert visible_page(app, 1) is True
 
 
 def test_settings_data_buttons_invoke_backup_and_export_callbacks():

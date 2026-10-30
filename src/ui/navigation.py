@@ -11,7 +11,9 @@ class AppPageNavigation:
     def __init__(self, page: ft.Page, pages: list[ft.Control]):
         self.page = page
         self.pages = pages
-        self.selected_index = 0  # Page controls are ordered Savings, Budget.
+        self.selected_index = (
+            1  # Page controls are ordered Savings, Budget, Transactions.
+        )
         self.page_view = ft.Stack(
             controls=[
                 ft.Container(
@@ -46,7 +48,7 @@ class AppPageNavigation:
                     key='nav-transactions',
                 ),
             ],
-            selected_index=1,
+            selected_index=0,
             bgcolor=colors.SURFACE,
             indicator_color=colors.BLUE,
             on_change=self._on_navigation_change,

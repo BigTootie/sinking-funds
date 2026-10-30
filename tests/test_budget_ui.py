@@ -226,3 +226,9 @@ async def test_new_budget_items_are_appended_to_the_list(headless_app):
     assert [category.name for category in app.budget_categories] == ['First', 'Second']
     saved = app.ledger.load_budget(app.budget_state.period)
     assert [category.name for category in saved.categories] == ['First', 'Second']
+
+
+async def test_budget_is_the_default_page(headless_app):
+    assert visible_page(headless_app.app, 1) is True
+    assert visible_page(headless_app.app, 0) is False
+    assert headless_app.app.navigation.navigation_bar.selected_index == 0
