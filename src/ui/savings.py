@@ -348,35 +348,54 @@ class FundCard:
         self.progress_bar = ft.ProgressBar(
             height=6, border_radius=10, color=colors.BLUE, bgcolor=colors.BORDER
         )
-        self.card_content = ft.Column(
-            [
-                ft.Row(
-                    [
-                        ft.Column(
-                            [self.name_text, self.target_text], spacing=4, expand=True
-                        ),
-                        ft.Column(
-                            [self.balance_text, self.funded_text],
-                            spacing=4,
-                            horizontal_alignment=ft.CrossAxisAlignment.END,
-                            expand=True,
-                        ),
-                        self._action_menu(index, count, on_move),
-                    ],
-                    spacing=12,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                ),
-                self.progress_bar,
-            ],
-            spacing=8,
-            expand=True,
-        )
+        self.card_content = ft.Row(
+            controls=[
+                ft.Column([ft.Row([
+                              ft.Column(
+                                  [self.name_text, self.target_text], spacing=4, expand=True
+                              ),
+                              ft.Column(
+                                  [self.balance_text, self.funded_text],
+                                  spacing=4,
+                                  horizontal_alignment=ft.CrossAxisAlignment.END,
+                                  expand=True,
+                              ),
+                          ],
+                          spacing=12,
+                          vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                      ),
+                      self.progress_bar,
+                  ],
+                  expand=True),
+                ft.Column([ft.Row([ft.IconButton(
+                                       icon=ft.Icons.ADD,
+                                       icon_size=16,
+                                       width=28,
+                                       height=28,
+                                       padding=0,
+                                       tooltip='Add to balance',
+                                       key=f'fund-add-{self.fund.id}',
+                                       on_click=lambda e: self._adjust(1),
+                                   )]),
+                           ft.Row([ft.IconButton(
+                                       icon=ft.Icons.REMOVE,
+                                       icon_size=16,
+                                       width=28,
+                                       height=28,
+                                       padding=0,
+                                       tooltip='Add to balance',
+                                       key=f'fund-add-{self.fund.id}',
+                                       on_click=lambda e: self._adjust(-1),
+                                   )]),
+                          ],
+                          margin=ft.Margin.only(right=20))
+                ])
         self.target_date_text = None
         self.on_track_status_text = None
         if fund.target_date is not None:
             self.target_date_text = ft.Text(size=12)
             self.on_track_status_text = ft.Text(size=12)
-            self.card_content.controls.append(
+            self.card_content.controls[0].controls.append(
                 ft.Row(
                     [
                         ft.Column([self.target_date_text], spacing=4, expand=True),
@@ -396,54 +415,11 @@ class FundCard:
             border=ft.Border.all(1, colors.BORDER),
             border_radius=16,
             padding=10,
-            height=(
-                DATED_FUND_CARD_HEIGHT
-                if fund.target_date is not None
-                else FUND_CARD_HEIGHT
-            ),
+            margin=ft.Margin.symmetric(vertical=5),
             key=f'fund-card-{fund.id}',
             on_click=self._edit,
         )
         self.refresh()
-
-    def _action_menu(self, index: int, count: int, on_move):
-        items = [
-            ft.PopupMenuItem(
-                content=ft.Text('Add money'),
-                icon=ft.Icons.ADD,
-                key=f'fund-add-{self.fund.id}',
-                on_click=lambda e: self._adjust(1),
-            ),
-            ft.PopupMenuItem(
-                content=ft.Text('Remove money'),
-                icon=ft.Icons.REMOVE,
-                key=f'fund-remove-{self.fund.id}',
-                on_click=lambda e: self._adjust(-1),
-            ),
-        ]
-        if on_move is not None and index > 0:
-            items.append(
-                ft.PopupMenuItem(
-                    content=ft.Text('Move up'),
-                    icon=ft.Icons.ARROW_UPWARD,
-                    key=f'fund-move-up-{self.fund.id}',
-                    on_click=lambda e: on_move(index - 1),
-                )
-            )
-        if on_move is not None and index < count - 1:
-            items.append(
-                ft.PopupMenuItem(
-                    content=ft.Text('Move down'),
-                    icon=ft.Icons.ARROW_DOWNWARD,
-                    key=f'fund-move-down-{self.fund.id}',
-                    on_click=lambda e: on_move(index + 1),
-                )
-            )
-        return ft.PopupMenuButton(
-            icon=ft.Icons.MORE_VERT,
-            tooltip='Fund actions',
-            items=items,
-        )
 
     def _edit(self, e):
         self.fund_dialog.modify(self.fund)
@@ -525,7 +501,8 @@ class FundList:
             on_click=self._add_fund,
         )
         self.list_view = ft.ReorderableListView(
-            spacing=FUND_CARD_SPACING,
+            spacing=30,
+            expand=True,
             on_reorder=self._reorder,
             scroll=ft.ScrollMode.HIDDEN,
         )
@@ -570,15 +547,6 @@ class FundList:
             for index, fund in enumerate(self.funds)
         ]
         self.list_view.controls = [card.control for card in self.cards]
-        self.list_view.height = (
-            sum(
-                DATED_FUND_CARD_HEIGHT
-                if fund.target_date is not None
-                else FUND_CARD_HEIGHT
-                for fund in self.funds
-            )
-            + max(0, len(self.funds) - 1) * FUND_CARD_SPACING
-        )
 
 
 class Dashboard:
