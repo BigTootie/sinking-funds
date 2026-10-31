@@ -184,11 +184,10 @@ major UX/feature gap; **P2** = scale, quality, or later-stage.
 
 ### P0 — Security and privacy
 
-12. **Nextcloud password protection depends on a working OS keyring.**
-    Passwords are stored in the OS keyring when available, with automatic
-    migration from older plaintext settings. Headless systems without a keyring
-    still fall back to the private `nextcloud_sync.json` file and show a warning.
-    E2E encryption is still not implemented.
+12. **Nextcloud credentials are protected only by the local database.**
+    v0.5 removes OS keyring support and stores the password and sync key in the
+    private local SQLite database. Revisit OS keyring storage in a later release
+    if the platform support is reliable.
 13. **No app lock / encryption at rest.** Anyone with the device or a backup can
     read the financial data. This is table stakes for a finance app.
 14. **No diagnostics/threat model.** Logs are not user-visible or consistently
@@ -470,7 +469,7 @@ allocation; no UI writes a total directly. Amounts are integer minor units
 - Auto-post uses the same op log. The `(fund_id, period)` unique key guarantees
   one posted occurrence even if two devices run the scheduler.
 - E2E encryption wraps op payloads/snapshots with a key derived from a passphrase
-  or recovery key; the key lives in the OS keyring. Nextcloud sees ciphertext.
+  or recovery key; the key lives in the local database. Nextcloud sees ciphertext.
 - No live `.db` file is ever placed in Nextcloud/Dropbox/Syncthing. The database
   stays local; only app-managed op segments and snapshots sync.
 
@@ -617,13 +616,14 @@ release target is native Flet packages for supported platforms. See
 - [x] Automatic sync after startup/local changes, manual retry, and sync status.
 - [x] Conflicting edits remain local until the user chooses local or remote.
 - [x] Auto-post deduplication across devices and offline catch-up.
-- [x] Optional AES-GCM end-to-end encryption with keyring-backed passphrase or
-  recovery key.
+- [x] Optional AES-GCM end-to-end encryption with a local-database-backed
+  passphrase or recovery key.
 - [x] Local-folder provider, WebDAV retries/conditional writes, and adapter
   tests.
 - [ ] E2E key rotation and recovery-key display flow remain future polish.
 - [ ] Encryption migration for an existing unencrypted sync folder remains a
   documented limitation.
+- [ ] Revisit OS keyring storage after the local-database fallback lands.
 
 
 - Op log + snapshots over WebDAV; device IDs; idempotent apply; tombstones;
@@ -633,7 +633,7 @@ release target is native Flet packages for supported platforms. See
   conflict resolution screen.
 - Retry/backoff, conditional GET, subdirectory installs, self-signed/private CA,
   MKCOL folder creation.
-- E2E encryption (optional passphrase/recovery key) with keyring storage.
+- E2E encryption (optional passphrase/recovery key) with local-database storage.
 - Provider abstraction; local-folder provider for tests and Syncthing-style
   setups.
 - **Exit:** two devices edit offline concurrently and merge without loss; a

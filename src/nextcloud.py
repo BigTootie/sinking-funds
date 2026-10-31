@@ -1,25 +1,13 @@
-"""Nextcloud connection settings, keyring credentials, and connectivity checks."""
+"""Nextcloud connection settings and connectivity checks."""
 
 from __future__ import annotations
 
 import json
-import logging
 from urllib.parse import quote, urlsplit
 
-import keyring
 import requests
 
 REQUEST_TIMEOUT = (5, 15)
-KEYRING_SERVICE = 'savings-funds'
-KEYRING_USERNAME = 'nextcloud'
-KEYRING_SYNC_USERNAME = 'sync-e2e'
-KEYRING_UNAVAILABLE_WARNING = (
-    'The OS keyring is unavailable, so the Nextcloud password cannot be saved. '
-    'Install a keyring backend to enable synchronization.'
-)
-
-logger = logging.getLogger(__name__)
-_credential_warning: str | None = None
 
 
 class SyncError(Exception):
@@ -87,65 +75,6 @@ def ping_nextcloud_server(nextcloud_sync_data: dict):
             return False, 'Failed to connect to server'
 
 
-def credential_storage_warning() -> str | None:
-    return _credential_warning
-
-
-def _reset_credential_warning() -> None:
-    global _credential_warning
-    _credential_warning = None
-
-
-def _keyring_get_password() -> str | None:
-    try:
-        return keyring.get_password(KEYRING_SERVICE, KEYRING_USERNAME)
-    except Exception:
-        logger.warning('Could not read the Nextcloud password from the keyring')
-        return None
-
-
-def _keyring_set_password(password: str) -> bool:
-    try:
-        keyring.set_password(KEYRING_SERVICE, KEYRING_USERNAME, password)
-    except Exception:
-        logger.warning('Could not save the Nextcloud password to the keyring')
-        return False
-    return True
-
-
-def _keyring_delete_password() -> bool:
-    try:
-        keyring.delete_password(KEYRING_SERVICE, KEYRING_USERNAME)
-    except Exception:
-        return False
-    return True
-
-
-def get_sync_key() -> str | None:
-    try:
-        return keyring.get_password(KEYRING_SERVICE, KEYRING_SYNC_USERNAME)
-    except Exception:
-        logger.warning('Could not read the sync encryption key from the keyring')
-        return None
-
-
-def set_sync_key(encoded_key: str) -> bool:
-    try:
-        keyring.set_password(KEYRING_SERVICE, KEYRING_SYNC_USERNAME, encoded_key)
-    except Exception:
-        logger.warning('Could not save the sync encryption key to the keyring')
-        return False
-    return True
-
-
-def delete_sync_key() -> bool:
-    try:
-        keyring.delete_password(KEYRING_SERVICE, KEYRING_SYNC_USERNAME)
-    except Exception:
-        return False
-    return True
-
-
 def _database_ledger(ledger=None):
     if ledger is not None:
         return ledger
@@ -154,59 +83,62 @@ def _database_ledger(ledger=None):
     return Ledger()
 
 
-def load_nextcloud_sync_data_from_db(ledger=None) -> dict | None:
-    """Load Nextcloud settings from SQLite, with the password in the keyring."""
-    global _credential_warning
-    _reset_credential_warning()
-    store = _database_ledger(ledger)
-    raw = store.get_setting('nextcloud_config')
-    if not raw:
-        return None
+def _connection_document(raw: str) -> dict:
     try:
         document = json.loads(raw)
         if not isinstance(document, dict):
             raise ValueError('expected an object')
-        required = ('base_url', 'username', 'data_path')
+        required = ('base_url', 'username', 'data_path', 'password')
         if any(not isinstance(document.get(key), str) for key in required):
             raise ValueError('missing connection fields')
         if not document['base_url'].strip() or not document['data_path'].strip():
             raise ValueError('server URL and data path are required')
+        if not document['password']:
+            raise ValueError('password is required')
         document['base_url'] = normalize_base_url(document['base_url'])
-    except (json.JSONDecodeError, TypeError, ValueError):
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
         raise SyncError(
-            'Could not read the Nextcloud settings stored locally.'
-        ) from None
-    password = _keyring_get_password()
-    if password is None:
-        raise SyncError(
-            'Could not read the Nextcloud password from the OS keyring. '
-            'Re-enter the password in Settings.'
-        )
-    document['password'] = password
+            'Could not read the Nextcloud settings stored locally. Re-enter the '
+            'server password in Settings.'
+        ) from exc
     return document
+
+
+def load_nextcloud_sync_data_from_db(ledger=None) -> dict | None:
+    """Load local Nextcloud settings, including the password."""
+    store = _database_ledger(ledger)
+    raw = store.get_setting('nextcloud_config')
+    if not raw:
+        return None
+    return _connection_document(raw)
 
 
 def save_nextcloud_sync_data_to_db(
     nextcloud_sync_data: dict | None, ledger=None
 ) -> bool:
-    """Store connection settings in SQLite; never store the password there."""
-    global _credential_warning
-    _reset_credential_warning()
+    """Store connection settings in the local SQLite database."""
     store = _database_ledger(ledger)
     document = dict(nextcloud_sync_data or {})
-    document.pop('passphrase', None)
-    password = document.pop('password', None)
-    if password is not None and not _keyring_set_password(password):
-        _credential_warning = KEYRING_UNAVAILABLE_WARNING
     if document:
+        if not document.get('password'):
+            raise SyncError('Enter the Nextcloud password.')
         payload = json.dumps(document, indent=4, sort_keys=True) + '\n'
         store.set_setting('nextcloud_config', payload)
     else:
         store.delete_setting('nextcloud_config')
-        delete_sync_key()
-        if not _keyring_delete_password():
-            _credential_warning = (
-                'Nextcloud synchronization is disabled, but the password could '
-                'not be removed from the OS keyring.'
-            )
+        store.delete_setting('sync_e2e_key')
+    return True
+
+
+def get_sync_key(ledger=None) -> str | None:
+    return _database_ledger(ledger).get_setting('sync_e2e_key')
+
+
+def set_sync_key(encoded_key: str, ledger=None) -> bool:
+    _database_ledger(ledger).set_setting('sync_e2e_key', encoded_key)
+    return True
+
+
+def delete_sync_key(ledger=None) -> bool:
+    _database_ledger(ledger).delete_setting('sync_e2e_key')
     return True

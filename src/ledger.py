@@ -8,7 +8,7 @@ import csv
 import json
 import sqlite3
 from collections.abc import Callable
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
@@ -141,6 +141,8 @@ class Ledger:
         self._sync_logging = True
         self._sync_depth = 0
         self._migrate()
+        with suppress(OSError):
+            self.path.chmod(0o600)
 
     @contextmanager
     def _sync_capture(self):

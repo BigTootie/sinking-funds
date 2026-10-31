@@ -60,14 +60,8 @@ async def test_settings_can_modify_nextcloud_configuration(headless_app):
     assert stored['base_url'] == 'cloud.example.test'
     assert stored['username'] == 'test-user'
     assert stored['data_path'] == 'Savings'
-    assert 'test-password' not in app.ledger.get_setting('nextcloud_config')
+    assert 'test-password' in app.ledger.get_setting('nextcloud_config')
     assert app.nextcloud_sync_data['password'] == 'test-password'
-    assert any(
-        isinstance(dialog, ft.SnackBar)
-        and 'keyring is unavailable' in dialog.content.value
-        for dialog in page.dialogs
-    )
-
     await click(page, 'settings-back-button')
     assert app.settings_view.control.visible is False
     assert visible_page(app, 1) is True

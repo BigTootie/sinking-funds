@@ -4,28 +4,12 @@ import os
 import tempfile
 from types import SimpleNamespace
 
-import pytest
 import pytest_asyncio
 from ui_helpers import FakePage
 
 os.environ.setdefault(
     'FLET_APP_STORAGE_DATA', tempfile.mkdtemp(prefix='savings-funds-tests-')
 )
-
-
-@pytest.fixture(autouse=True)
-def no_os_keyring(monkeypatch):
-    """Keep tests deterministic when a desktop keyring is available."""
-    import keyring
-
-    import nextcloud
-
-    def unavailable(*_args, **_kwargs):
-        raise keyring.errors.NoKeyringError('test keyring disabled')
-
-    monkeypatch.setattr(nextcloud.keyring, 'get_password', unavailable)
-    monkeypatch.setattr(nextcloud.keyring, 'set_password', unavailable)
-    monkeypatch.setattr(nextcloud.keyring, 'delete_password', unavailable)
 
 
 def _seed_funds(store, entries):

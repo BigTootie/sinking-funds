@@ -13,7 +13,13 @@ from budget import (
     reorder_budget_categories,
 )
 from fund import Fund
-from ui.shared import AmountAdjustmentDialog, ConfirmDialog, MessageDialog, dialog_form
+from ui.shared import (
+    AmountAdjustmentDialog,
+    ConfirmDialog,
+    MessageDialog,
+    dialog_form,
+    dialog_width,
+)
 from utils import money_format, parse_money, parse_signed_money
 
 BUDGET_ROW_HEIGHT = 58
@@ -153,7 +159,9 @@ class BudgetCategoryDialog:
                 if is_modify
                 else ('Add income' if kind == 'income' else 'Add expense'),
                 content=dialog_form(
-                    [name_input, budget_input, spent_input, error], height=240
+                    [name_input, budget_input, spent_input, error],
+                    height=240,
+                    width=dialog_width(self.page),
                 ),
                 actions=actions,
                 modal=True,
@@ -261,36 +269,44 @@ class BudgetRow:
             text_align=ft.TextAlign.RIGHT,
             weight=ft.FontWeight.W_600,
         )
+        self.planned_label = ft.Text('Planned', size=10, color=colors.TEXT_SECONDARY)
+        self.remaining_label = ft.Text(
+            'Remaining', size=10, color=colors.TEXT_SECONDARY
+        )
+        self.add_button = ft.IconButton(
+            icon=ft.Icons.ADD,
+            icon_size=16,
+            width=28,
+            height=28,
+            padding=0,
+            tooltip='Add to actual',
+            key=f'budget-add-{category.category_id}',
+            on_click=lambda e: self._adjust(1),
+        )
+        self.remove_button = ft.IconButton(
+            icon=ft.Icons.REMOVE,
+            icon_size=16,
+            width=28,
+            height=28,
+            padding=0,
+            tooltip='Remove from actual',
+            key=f'budget-remove-{category.category_id}',
+            on_click=lambda e: self._adjust(-1),
+        )
+        self.row = ft.Row(
+            [
+                self.name,
+                self.planned,
+                self.remaining,
+                self.add_button,
+                self.remove_button,
+            ],
+            spacing=6,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+        self.mobile_column = ft.Column(spacing=2, tight=True)
         self.control = ft.Container(
-            content=ft.Row(
-                [
-                    self.name,
-                    self.planned,
-                    self.remaining,
-                    ft.IconButton(
-                        icon=ft.Icons.ADD,
-                        icon_size=16,
-                        width=28,
-                        height=28,
-                        padding=0,
-                        tooltip='Add to actual',
-                        key=f'budget-add-{category.category_id}',
-                        on_click=lambda e: self._adjust(1),
-                    ),
-                    ft.IconButton(
-                        icon=ft.Icons.REMOVE,
-                        icon_size=16,
-                        width=28,
-                        height=28,
-                        padding=0,
-                        tooltip='Remove from actual',
-                        key=f'budget-remove-{category.category_id}',
-                        on_click=lambda e: self._adjust(-1),
-                    ),
-                ],
-                spacing=6,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            ),
+            content=self.row,
             height=BUDGET_ROW_HEIGHT,
             padding=ft.Padding.symmetric(horizontal=8),
             border=ft.Border.only(bottom=ft.BorderSide(1, colors.BORDER)),
@@ -298,7 +314,55 @@ class BudgetRow:
             ink=True,
             on_click=self._edit,
         )
+        self._compact = False
         self.refresh()
+
+    def resize(self, compact: bool):
+        if compact == self._compact and self.mobile_column.controls:
+            return
+        self._compact = compact
+        if compact:
+            self.row.controls = []
+            self.mobile_column.controls = [
+                ft.Row(
+                    [self.name, self.add_button, self.remove_button],
+                    spacing=6,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                ft.Row(
+                    [
+                        self.planned_label,
+                        self.planned,
+                        self.remaining_label,
+                        self.remaining,
+                    ],
+                    spacing=6,
+                    wrap=True,
+                ),
+            ]
+            self.control.content = self.mobile_column
+            self.control.height = 76
+            self.name.size = 14
+            self.planned.size = 13
+            self.remaining.size = 13
+            self.planned.width = 78
+            self.remaining.width = 88
+        else:
+            self.mobile_column.controls = []
+            self.row.controls = [
+                self.name,
+                self.planned,
+                self.remaining,
+                self.add_button,
+                self.remove_button,
+            ]
+            self.control.content = self.row
+            self.control.height = BUDGET_ROW_HEIGHT
+            self.name.size = 15
+            self.planned.size = 14
+            self.remaining.size = 14
+            self.planned.width = 110
+            self.remaining.width = 110
 
     def _edit(self, e):
         self.dialog.modify(self.category)
@@ -391,6 +455,54 @@ class BudgetDashboard:
             format_period(self.period), size=28, weight=ft.FontWeight.BOLD, expand=True
         )
         self.left_to_budget = ft.Text(size=16, weight=ft.FontWeight.W_600)
+        self.prev_button = ft.IconButton(
+            icon=ft.Icons.CHEVRON_LEFT,
+            tooltip='Previous month',
+            key='budget-prev-month',
+            on_click=lambda e: self._shift_month(-1),
+        )
+        self.next_button = ft.IconButton(
+            icon=ft.Icons.CHEVRON_RIGHT,
+            tooltip='Next month',
+            key='budget-next-month',
+            on_click=lambda e: self._shift_month(1),
+        )
+        self.copy_button = ft.TextButton(
+            'Copy plan',
+            icon=ft.Icons.CONTENT_COPY_OUTLINED,
+            key='copy-budget-plan-button',
+            on_click=lambda e: self.on_copy_plan() if self.on_copy_plan else None,
+        )
+        self.reset_button = ft.TextButton(
+            'Reset month',
+            icon=ft.Icons.RESTART_ALT,
+            key='reset-budget-month-button',
+            on_click=self._confirm_reset,
+        )
+        self.header_row = ft.Row(
+            [
+                self.prev_button,
+                self.period_text,
+                self.next_button,
+                self.copy_button,
+                self.reset_button,
+            ],
+            spacing=6,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+        self.header_month_row = ft.Row(
+            [self.prev_button, self.period_text, self.next_button],
+            spacing=6,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+        self.header_action_row = ft.Row(
+            [self.copy_button, self.reset_button],
+            spacing=6,
+            wrap=True,
+        )
+        self.header_container = ft.Container(content=self.header_row)
+        self.income_header = self.income_section.content.controls[0]
+        self.expense_header = self.expense_section.content.controls[0]
         self.left_column = ft.Column(
             [self.income_section, self.expense_section],
             spacing=18,
@@ -399,38 +511,7 @@ class BudgetDashboard:
         self.content = ft.Container(
             content=ft.Column(
                 [
-                    ft.Row(
-                        [
-                            ft.IconButton(
-                                icon=ft.Icons.CHEVRON_LEFT,
-                                tooltip='Previous month',
-                                key='budget-prev-month',
-                                on_click=lambda e: self._shift_month(-1),
-                            ),
-                            self.period_text,
-                            ft.IconButton(
-                                icon=ft.Icons.CHEVRON_RIGHT,
-                                tooltip='Next month',
-                                key='budget-next-month',
-                                on_click=lambda e: self._shift_month(1),
-                            ),
-                            ft.TextButton(
-                                'Copy plan',
-                                icon=ft.Icons.CONTENT_COPY_OUTLINED,
-                                key='copy-budget-plan-button',
-                                on_click=lambda e: (
-                                    self.on_copy_plan() if self.on_copy_plan else None
-                                ),
-                            ),
-                            ft.TextButton(
-                                'Reset month',
-                                icon=ft.Icons.RESTART_ALT,
-                                key='reset-budget-month-button',
-                                on_click=self._confirm_reset,
-                            ),
-                        ],
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
+                    self.header_container,
                     ft.Container(
                         content=self.left_to_budget,
                         padding=12,
@@ -460,6 +541,8 @@ class BudgetDashboard:
         )
         self.rows: list[BudgetRow] = []
         self.cards = self.rows
+        self._compact = False
+        self.row_height = BUDGET_ROW_HEIGHT
         self.refresh()
         self.resize()
 
@@ -556,8 +639,10 @@ class BudgetDashboard:
         expenses = [row.control for row in self.rows if row.category.kind == 'expense']
         self.income_list.controls = income
         self.expense_list.controls = expenses
-        self.income_list.height = max(1, len(income) * BUDGET_ROW_HEIGHT)
-        self.expense_list.height = max(1, len(expenses) * BUDGET_ROW_HEIGHT)
+        for row in self.rows:
+            row.resize(self._compact)
+        self.income_list.height = max(1, len(income) * self.row_height)
+        self.expense_list.height = max(1, len(expenses) * self.row_height)
         self.left_to_budget.value = self.summary.left_to_budget.value
         self.left_to_budget.color = self.summary.left_to_budget.color
 
@@ -567,6 +652,40 @@ class BudgetDashboard:
         self.content.width = min(1080, max(width - 2 * margin, 0))
         self.content.padding = margin
         inner_width = max(0, self.content.width - 2 * margin)
+        self._compact = width < 600
+        self.row_height = 76 if self._compact else BUDGET_ROW_HEIGHT
+        self.period_text.expand = True
+        self.period_text.size = 22 if self._compact else 28
+        if self._compact:
+            self.header_row.controls = []
+            self.header_month_row.controls = [
+                self.prev_button,
+                self.period_text,
+                self.next_button,
+            ]
+            self.header_action_row.controls = [self.copy_button, self.reset_button]
+            self.header_container.content = ft.Column(
+                [self.header_month_row, self.header_action_row], spacing=4
+            )
+        else:
+            self.header_month_row.controls = []
+            self.header_action_row.controls = []
+            self.header_row.controls = [
+                self.prev_button,
+                self.period_text,
+                self.next_button,
+                self.copy_button,
+                self.reset_button,
+            ]
+            self.header_container.content = self.header_row
+        self.income_header.visible = not self._compact
+        self.expense_header.visible = not self._compact
+        for row in self.rows:
+            row.resize(self._compact)
+        income_count = sum(1 for row in self.rows if row.category.kind == 'income')
+        expense_count = sum(1 for row in self.rows if row.category.kind == 'expense')
+        self.income_list.height = max(1, income_count * self.row_height)
+        self.expense_list.height = max(1, expense_count * self.row_height)
         if inner_width < 720:
             self.left_column.width = inner_width
             self.summary.control.visible = False

@@ -16,7 +16,13 @@ from nextcloud import (
     save_nextcloud_sync_data_to_db,
 )
 from sync.crypto import new_recovery_key
-from ui.shared import ConfirmDialog, MessageDialog, dialog_form
+from ui.shared import (
+    ConfirmDialog,
+    MessageDialog,
+    dialog_form,
+    dialog_width,
+    is_mobile,
+)
 
 
 class SettingsButton:
@@ -64,6 +70,9 @@ class AppHeader:
             border=ft.Border.only(bottom=ft.BorderSide(1, colors.BORDER)),
         )
 
+    def resize(self, width: int):
+        self.control.padding = 12 if width < 600 else 20
+
 
 class NextcloudConfigDialog:
     """Add or edit the saved Nextcloud connection using one shared form."""
@@ -100,7 +109,7 @@ class NextcloudConfigDialog:
                 error.value = 'Could not save Nextcloud settings.'
                 self.page.update()
                 return False
-        except OSError as exc:
+        except (OSError, SyncError) as exc:
             error.value = f'Could not save Nextcloud settings: {exc}'
             self.page.update()
             return False
@@ -193,6 +202,10 @@ class NextcloudConfigDialog:
                 error.value = 'Enter the folder path on Nextcloud.'
                 self.page.update()
                 return
+            if not (password_input.value or '').strip():
+                error.value = 'Enter the Nextcloud password.'
+                self.page.update()
+                return
 
             if (
                 encrypted_switch.value
@@ -263,6 +276,7 @@ class NextcloudConfigDialog:
                     error,
                 ],
                 height=470,
+                width=dialog_width(self.page),
             ),
             actions=actions,
             on_dismiss=(
@@ -374,50 +388,53 @@ class SettingsView:
             nextcloud_actions.append(self.conflicts_button)
         if self.on_disable_sync is not None:
             nextcloud_actions.append(self.disable_sync_button)
-        self.nextcloud_card = ft.Container(
+        self.nextcloud_info = ft.Container(
             content=ft.Row(
                 [
                     ft.Container(
-                        content=ft.Row(
-                            [
-                                ft.Container(
-                                    content=ft.Icon(
-                                        ft.Icons.CLOUD_OUTLINED,
-                                        size=22,
-                                        color=colors.BLUE,
-                                    ),
-                                    bgcolor=colors.SURFACE,
-                                    border_radius=10,
-                                    padding=11,
-                                ),
-                                ft.Column(
-                                    [
-                                        ft.Text(
-                                            'Nextcloud Sync',
-                                            size=15,
-                                            weight=ft.FontWeight.W_600,
-                                        ),
-                                        ft.Text(
-                                            'Manage the server connection and synchronization.',
-                                            size=12,
-                                            color=colors.TEXT_SECONDARY,
-                                        ),
-                                        self.sync_status_text,
-                                    ],
-                                    spacing=2,
-                                    expand=True,
-                                ),
-                            ],
-                            spacing=12,
-                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        content=ft.Icon(
+                            ft.Icons.CLOUD_OUTLINED,
+                            size=22,
+                            color=colors.BLUE,
                         ),
-                        expand=True,
-                        ink=True,
-                        key='nextcloud-settings-card',
-                        on_click=self._modify_nextcloud,
+                        bgcolor=colors.SURFACE,
+                        border_radius=10,
+                        padding=11,
                     ),
-                    *nextcloud_actions,
+                    ft.Column(
+                        [
+                            ft.Text(
+                                'Nextcloud Sync',
+                                size=15,
+                                weight=ft.FontWeight.W_600,
+                            ),
+                            ft.Text(
+                                'Manage the server connection and synchronization.',
+                                size=12,
+                                color=colors.TEXT_SECONDARY,
+                            ),
+                            self.sync_status_text,
+                        ],
+                        spacing=2,
+                        expand=True,
+                    ),
                 ],
+                spacing=12,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            expand=True,
+            ink=True,
+            key='nextcloud-settings-card',
+            on_click=self._modify_nextcloud,
+        )
+        self.nextcloud_actions_row = ft.Row(
+            nextcloud_actions,
+            spacing=8,
+            wrap=True,
+        )
+        self.nextcloud_card = ft.Container(
+            content=ft.Row(
+                [self.nextcloud_info, self.nextcloud_actions_row],
                 spacing=8,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
@@ -451,7 +468,7 @@ class SettingsView:
                 self.on_open_data_folder() if self.on_open_data_folder else None
             ),
         )
-        self.data_card = ft.Container(
+        self.data_info = ft.Container(
             content=ft.Row(
                 [
                     ft.Container(
@@ -478,17 +495,28 @@ class SettingsView:
                         spacing=2,
                         expand=True,
                     ),
-                    self.backup_button,
-                    ft.PopupMenuButton(
-                        icon=ft.Icons.MORE_HORIZ,
-                        tooltip='More data actions',
-                        items=[
-                            self.export_item,
-                            self.restore_item,
-                            self.open_folder_item,
-                        ],
-                    ),
                 ],
+                spacing=12,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            expand=True,
+        )
+        self.data_menu = ft.PopupMenuButton(
+            icon=ft.Icons.MORE_HORIZ,
+            tooltip='More data actions',
+            items=[
+                self.export_item,
+                self.restore_item,
+                self.open_folder_item,
+            ],
+        )
+        self.data_actions_row = ft.Row(
+            [self.backup_button, self.data_menu],
+            spacing=10,
+        )
+        self.data_card = ft.Container(
+            content=ft.Row(
+                [self.data_info, self.data_actions_row],
                 spacing=10,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
@@ -528,6 +556,37 @@ class SettingsView:
                 horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
             ),
         )
+        self.resize()
+
+    def resize(self):
+        mobile = is_mobile(self.page)
+        self.control.padding = 12 if mobile else 24
+        card_padding = 12 if mobile else 16
+        self.appearance_card.padding = card_padding
+        self.nextcloud_card.padding = card_padding
+        self.data_card.padding = card_padding
+        self.nextcloud_info.expand = not mobile
+        self.data_info.expand = not mobile
+        if mobile:
+            self.nextcloud_card.content = ft.Column(
+                [self.nextcloud_info, self.nextcloud_actions_row],
+                spacing=8,
+            )
+            self.data_card.content = ft.Column(
+                [self.data_info, self.data_actions_row],
+                spacing=8,
+            )
+        else:
+            self.nextcloud_card.content = ft.Row(
+                [self.nextcloud_info, self.nextcloud_actions_row],
+                spacing=8,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            )
+            self.data_card.content = ft.Row(
+                [self.data_info, self.data_actions_row],
+                spacing=10,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            )
 
     def _modify_nextcloud(self, e):
         self.nextcloud_dialog.modify()

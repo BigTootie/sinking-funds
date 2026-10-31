@@ -26,14 +26,16 @@ or web app. See [`CHANGELOG.md`](CHANGELOG.md) for release notes.
 - Synchronize accounts, transactions, funds, budgets, history, and
   contributions across devices through app-managed operation logs and snapshots
   on Nextcloud. The local database is never uploaded.
-- Keep Nextcloud credentials in the OS keyring and optionally encrypt synced
-  data end to end with a passphrase or recovery key.
+- Keep Nextcloud credentials in the local database and optionally encrypt
+  synced data end to end with a passphrase or recovery key.
 
 The bottom navigation opens Budget, Savings, and Transactions. The budget page
-uses a clean EveryDollar-inspired list with a right-side monthly summary. Fund
-cards and budget rows can be reordered. Use the plus and minus controls to
-adjust actual amounts; editing a row lets you change its details. Destructive
-actions ask for confirmation.
+uses a clean EveryDollar-inspired list with a right-side monthly summary on
+desktop and stacked, compact rows on phones. Fund cards and budget rows can be
+reordered. Use the plus and minus controls to adjust actual amounts; editing a
+row lets you change its details. Destructive actions ask for confirmation. The
+Budget, Savings, Transactions, Settings, headers, and dialogs adapt to phone
+widths without changing the desktop layout above 600 px.
 
 ## Run the app
 
@@ -78,10 +80,11 @@ The only other local files are explicit user actions:
 - `exports/savings-funds-*.db` for portable exports;
 - temporary SQLite `-wal` and `-shm` files while the database is open.
 
-The Nextcloud password and optional encryption key are stored in the operating
-system keyring (Windows Credential Manager, macOS Keychain, or Linux Secret
-Service/KWallet). No password or key is written to the database, JSON, logs, or
-Nextcloud.
+The Nextcloud password and optional encryption key are stored in the local
+`ledger.db` database. They are never written to logs or Nextcloud, and settings
+are device-local. Because database backups and explicit exports are complete
+snapshots, protect those files as sensitive data. OS keyring integration is not
+used in v0.5.
 
 ## Synchronization
 
@@ -108,11 +111,11 @@ sync. Recurring fund contributions use the shared `(fund_id, period)` identity,
 so the same month is never posted twice across devices.
 
 If encryption is enabled, the user creates a passphrase or recovery key on the
-first device and enters it once on each additional device. The key is kept in
-the OS keyring so normal startups do not prompt again. Nextcloud stores
-operation and snapshot contents as ciphertext; the small protocol manifest is
-unencrypted metadata. Losing the passphrase/recovery key makes remote encrypted
-data unrecoverable; local data remains usable.
+first device and enters it once on each additional device. The derived key is
+kept in the local database so normal startups do not prompt again. Nextcloud
+stores operation and snapshot contents as ciphertext; the small protocol
+manifest is unencrypted metadata. Losing the passphrase/recovery key makes
+remote encrypted data unrecoverable; local data remains usable.
 
 ## Project structure
 
@@ -130,8 +133,7 @@ data unrecoverable; local data remains usable.
   transactions, funds, per-month budget allocations, history, settings,
   fund contributions, and the operation log.
 - `src/data.py` handles budget bridges, database backups, and portable exports.
-- `src/nextcloud.py` provides keyring-backed Nextcloud settings stored in
-  SQLite and connection checks.
+- `src/nextcloud.py` provides local Nextcloud settings and connection checks.
 - `src/sync/` contains the operation protocol, encryption, WebDAV/local
   providers, and the sync engine.
 - `src/colors.py` and `src/utils.py` contain shared presentation and money helpers.

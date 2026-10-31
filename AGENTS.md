@@ -18,7 +18,7 @@ Inspect the actual repository before making changes. Preserve the existing separ
 - `src/ui/`: reusable pages, dialogs, cards, navigation, and presentation. `shared.py` holds cross-page dialogs; `transactions.py` holds the ledger register.
 - `src/ledger.py`: the single runtime SQLite database: accounts, transactions, funds, budget groups/allocations/history, contributions, settings, Nextcloud configuration/state, operation log, cursors, and conflicts.
 - `src/data.py`: budget bridges, database backups, portable exports, and schema helpers.
-- `src/nextcloud.py`: keyring-backed Nextcloud settings and connectivity checks.
+- `src/nextcloud.py`: local Nextcloud settings and connectivity checks.
 - `src/sync/`: operation protocol, optional encryption, WebDAV/local providers, and sync engine.
 - `src/fund.py` and `src/budget.py`: models and pure calculations.
 - `src/utils.py`: money parsing/formatting; `src/colors.py`: shared styling.
@@ -33,13 +33,13 @@ Treat this list as guidance; the implementation in the repository is authoritati
 - Do not add support for legacy data files (`balance.txt`, `funds.json`, `budget.json`, `budget_history.json`, `nextcloud_sync.json`, or `sync_state.json`).
 - Preserve incompatible or damaged data by quarantining or backing it up before replacing it.
 - Never overwrite real user data during tests. Patch the data path constants to `tmp_path`.
-- Never hard-code credentials or log secrets. Nextcloud non-secret settings live in SQLite; the password lives in the OS keyring.
+- Never hard-code credentials or log secrets. Nextcloud settings, the password, and the optional sync key live in the local SQLite database; they are never synced or logged.
 - Budget periods roll over on startup. Archives live in the SQLite `budget_history` table.
 - The single SQLite database is local-only. Do not sync a live `ledger.db`; use operation logs/snapshots or database backup/export for portability.
 
 ## Synchronization
 - Sync uses the operation log and snapshots in `src/sync/`; never sync a live SQLite file.
-- Nextcloud settings/state live in SQLite; the password and optional encryption key live in the OS keyring.
+- Nextcloud settings/state, the password, and the optional encryption key live in the local SQLite database.
 - Block conflicting edits until the user resolves them; do not silently overwrite either side.
 - Keep blocking network calls off the UI event loop and never log secrets.
 

@@ -15,11 +15,18 @@
 - Deduplicate recurring fund contributions across devices with the existing
   `(fund_id, period)` identity, including offline catch-up cases.
 - Add optional end-to-end encryption using a user passphrase or recovery key,
-  AES-GCM payloads, and a key stored in the OS keyring.
+  AES-GCM payloads, and a key stored in the local database.
 - Add sync status, last-sync/error reporting, device cursors, and conflict
   review to Settings.
 - Ensure Nextcloud failures, invalid documents, checksum mismatches, and
   unsupported protocol versions fail safely without corrupting local data.
+
+### Mobile UI
+
+- Adapt budget, savings, transactions, settings, headers, and dialogs to phone
+  widths while keeping the existing desktop layout above 600 px.
+- Stack settings actions and transaction filters on narrow screens, and use
+  compact two-line budget rows.
 
 ### One local data file
 
@@ -31,6 +38,8 @@
 - Store sync state, cursors, conflicts, and operation history in the same
   database. No local JSONL cache or live database file is uploaded.
 - Prune database backups to the latest ten files.
+- Remove OS keyring support. Nextcloud credentials and the optional sync key
+  are stored only in the local database and are never synced.
 
 ### Quality
 

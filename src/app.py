@@ -33,7 +33,6 @@ from data import (
 from fund import Fund
 from ledger import Ledger, LedgerError
 from nextcloud import (
-    credential_storage_warning,
     delete_sync_key,
     get_sync_key,
     load_nextcloud_sync_data_from_db,
@@ -127,6 +126,7 @@ class SavingsFundsApp:
             ),
         )
         self.header = AppHeader(self.show_settings)
+        self.header.resize(self.page.width or 0)
         self.settings_view = SettingsView(
             self.page,
             self.show_dashboard,
@@ -160,11 +160,6 @@ class SavingsFundsApp:
             self.startup_errors.append(str(exc))
             self.nextcloud_sync_data = None
 
-        warning = credential_storage_warning()
-        if warning:
-            self.startup_notice = (
-                f'{self.startup_notice} {warning}' if self.startup_notice else warning
-            )
         if self.nextcloud_sync_data:
             self._configure_sync_engine()
             self._update_sync_status()
@@ -206,7 +201,7 @@ class SavingsFundsApp:
             salt = data.get('kdf_salt')
             passphrase = self._sync_passphrase
             if data.get('encrypted'):
-                encoded_key = get_sync_key()
+                encoded_key = get_sync_key(self.ledger)
                 if encoded_key:
                     crypto = SyncCrypto.from_encoded_key(encoded_key, salt)
                     passphrase = None
@@ -267,7 +262,7 @@ class SavingsFundsApp:
             and getattr(engine, 'crypto', None) is not None
             and self.nextcloud_sync_data
             and self.nextcloud_sync_data.get('encrypted')
-            and set_sync_key(engine.crypto.encoded_key())
+            and set_sync_key(engine.crypto.encoded_key(), self.ledger)
         ):
             data = dict(self.nextcloud_sync_data)
             data['kdf_salt'] = engine.crypto.salt
@@ -315,11 +310,6 @@ class SavingsFundsApp:
 
     def _show_snack(self, message: str, bgcolor=None):
         show_snack(self.page, message, bgcolor=bgcolor)
-
-    def _show_credential_warning(self):
-        warning = credential_storage_warning()
-        if warning:
-            self._show_snack(warning, colors.RED)
 
     def _save_data(
         self,
@@ -451,7 +441,7 @@ class SavingsFundsApp:
         if data.get('encrypted'):
             if passphrase:
                 self._sync_passphrase = passphrase
-            elif not get_sync_key():
+            elif not get_sync_key(self.ledger):
                 self._show_snack(
                     'Enter a sync passphrase to enable encryption.', colors.RED
                 )
@@ -462,7 +452,7 @@ class SavingsFundsApp:
         else:
             self._sync_passphrase = None
             data.pop('kdf_salt', None)
-            delete_sync_key()
+            delete_sync_key(self.ledger)
             save_nextcloud_sync_data_to_db(data, self.ledger)
         self.nextcloud_sync_data = data
         self._configure_sync_engine()
@@ -470,7 +460,6 @@ class SavingsFundsApp:
         if hasattr(self, 'settings_view'):
             self.settings_view.control.visible = True
         self.page.update()
-        self._show_credential_warning()
         self._schedule_sync()
 
     async def _manual_sync(self):
@@ -497,7 +486,6 @@ class SavingsFundsApp:
         self._sync_requested = False
         self._update_sync_status()
         self._show_snack('Nextcloud synchronization is disabled.')
-        self._show_credential_warning()
 
     def _record_load_error(self, exc: Exception):
         self.startup_errors.append(str(exc))
@@ -907,5 +895,10 @@ class SavingsFundsApp:
             self.dashboard.resize()
         if self.budget_dashboard is not None:
             self.budget_dashboard.resize()
-        if self.dashboard is not None or self.budget_dashboard is not None:
-            self.page.update()
+        if self.transactions_dashboard is not None:
+            self.transactions_dashboard.resize()
+        if hasattr(self, 'settings_view'):
+            self.settings_view.resize()
+        if hasattr(self, 'header'):
+            self.header.resize(self.page.width or 0)
+        self.page.update()

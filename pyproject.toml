@@ -14,7 +14,6 @@ authors = [
 dependencies = [
     'cryptography>=42.0.0',
     'flet>=1.0.4',
-    'keyring>=25.7.0',
     'platformdirs>=4.12.4',
     'python-dateutil>=2.9.0.post0',
     'requests>=2.34.2',

@@ -10,7 +10,7 @@ import flet as ft
 import colors
 from ledger import Account, Ledger, LedgerError
 from paths import get_data_dir
-from ui.shared import ConfirmDialog, dialog_form, show_snack
+from ui.shared import ConfirmDialog, dialog_form, dialog_width, show_snack
 from utils import money_format, parse_money, parse_signed_money
 
 ACCOUNT_TYPES = ['checking', 'savings', 'cash', 'credit']
@@ -97,7 +97,11 @@ class AccountDialog:
         self.page.show_dialog(
             ft.AlertDialog(
                 title='Edit account' if account else 'Add account',
-                content=dialog_form([name, account_type, opening, error], height=240),
+                content=dialog_form(
+                    [name, account_type, opening, error],
+                    height=240,
+                    width=dialog_width(self.page),
+                ),
                 actions=actions,
                 modal=True,
             )
@@ -252,6 +256,7 @@ class TransactionDialog:
                         error,
                     ],
                     height=430,
+                    width=dialog_width(self.page),
                 ),
                 actions=actions,
                 modal=True,
@@ -316,15 +321,24 @@ class TransactionsDashboard:
         )
         self.account_row = ft.Row(spacing=10, wrap=True)
         self.register = ft.Column(spacing=0)
+        self.register_date_header = ft.Text(
+            'DATE',
+            size=10,
+            width=100,
+            color=colors.TEXT_SECONDARY,
+            weight=ft.FontWeight.BOLD,
+        )
+        self.register_amount_header = ft.Text(
+            'AMOUNT',
+            size=10,
+            width=110,
+            text_align=ft.TextAlign.RIGHT,
+            color=colors.TEXT_SECONDARY,
+            weight=ft.FontWeight.BOLD,
+        )
         self.register_header = ft.Row(
             [
-                ft.Text(
-                    'DATE',
-                    size=10,
-                    width=100,
-                    color=colors.TEXT_SECONDARY,
-                    weight=ft.FontWeight.BOLD,
-                ),
+                self.register_date_header,
                 ft.Text(
                     'PAYEE / DETAILS',
                     size=10,
@@ -332,133 +346,164 @@ class TransactionsDashboard:
                     color=colors.TEXT_SECONDARY,
                     weight=ft.FontWeight.BOLD,
                 ),
-                ft.Text(
-                    'AMOUNT',
-                    size=10,
-                    width=110,
-                    text_align=ft.TextAlign.RIGHT,
-                    color=colors.TEXT_SECONDARY,
-                    weight=ft.FontWeight.BOLD,
-                ),
+                self.register_amount_header,
                 ft.Container(width=18),
             ],
             spacing=8,
         )
+        self.header_title = ft.Text(
+            'Transactions',
+            size=30,
+            weight=ft.FontWeight.BOLD,
+            expand=True,
+        )
+        self.header_buttons = ft.Row(
+            [
+                ft.OutlinedButton(
+                    'Add account',
+                    icon=ft.Icons.ADD,
+                    key='add-account-button',
+                    on_click=lambda e: self.account_dialog.open(),
+                ),
+                ft.FilledButton(
+                    'Add transaction',
+                    icon=ft.Icons.ADD,
+                    key='add-transaction-button',
+                    on_click=lambda e: self.transaction_dialog.open(),
+                ),
+            ],
+            spacing=10,
+            wrap=True,
+        )
+        self.header_actions = ft.Row(
+            [self.header_title, self.header_buttons],
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+        self.filter_controls = ft.Row(
+            [self.account_filter, self.cleared_filter],
+            spacing=10,
+        )
+        self.filters_row = ft.Row(
+            [self.search, self.filter_controls],
+            spacing=10,
+        )
+        self.footer_actions = ft.Row(
+            [
+                ft.TextButton(
+                    'Export CSV',
+                    icon=ft.Icons.TABLE_VIEW_OUTLINED,
+                    key='export-ledger-csv-button',
+                    on_click=lambda e: self._export('csv'),
+                ),
+                ft.TextButton(
+                    'Export JSON',
+                    icon=ft.Icons.DOWNLOAD_OUTLINED,
+                    key='export-ledger-json-button',
+                    on_click=lambda e: self._export('json'),
+                ),
+                ft.TextButton(
+                    'Import ledger JSON',
+                    icon=ft.Icons.UPLOAD_FILE_OUTLINED,
+                    key='import-ledger-json-button',
+                    on_click=lambda e: self._import(),
+                ),
+            ],
+            wrap=True,
+        )
+        self.date_width = 100
+        self.amount_width = 110
+        self.main_column = ft.Column(
+            [
+                self.header_actions,
+                ft.Container(
+                    content=ft.Row(
+                        [
+                            ft.Column(
+                                [
+                                    ft.Text(
+                                        'TOTAL BALANCE',
+                                        size=11,
+                                        weight=ft.FontWeight.BOLD,
+                                        color=colors.TEXT_SECONDARY,
+                                    ),
+                                    self.total_text,
+                                    self.cleared_text,
+                                    self.uncleared_text,
+                                ],
+                                spacing=4,
+                                expand=True,
+                            ),
+                            ft.Icon(
+                                ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED,
+                                size=36,
+                                color=colors.BLUE,
+                            ),
+                        ]
+                    ),
+                    padding=20,
+                    border=ft.Border.all(1, colors.BORDER),
+                    border_radius=18,
+                ),
+                self.accounts_label,
+                self.account_row,
+                self.filters_row,
+                ft.Container(
+                    content=ft.Column(
+                        [
+                            self.register_header,
+                            ft.Divider(height=1, color=colors.BORDER),
+                            self.register,
+                        ],
+                        spacing=0,
+                    ),
+                    border=ft.Border.all(1, colors.BORDER),
+                    border_radius=16,
+                    padding=12,
+                ),
+                self.footer_actions,
+            ],
+            spacing=16,
+            scroll=ft.ScrollMode.AUTO,
+            expand=True,
+        )
         self.control = ft.Container(
             padding=24,
             content=ft.Row(
-                [
-                    ft.Column(
-                        [
-                            ft.Row(
-                                [
-                                    ft.Text(
-                                        'Transactions',
-                                        size=30,
-                                        weight=ft.FontWeight.BOLD,
-                                        expand=True,
-                                    ),
-                                    ft.OutlinedButton(
-                                        'Add account',
-                                        icon=ft.Icons.ADD,
-                                        key='add-account-button',
-                                        on_click=lambda e: self.account_dialog.open(),
-                                    ),
-                                    ft.FilledButton(
-                                        'Add transaction',
-                                        icon=ft.Icons.ADD,
-                                        key='add-transaction-button',
-                                        on_click=lambda e: (
-                                            self.transaction_dialog.open()
-                                        ),
-                                    ),
-                                ],
-                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                            ),
-                            ft.Container(
-                                content=ft.Row(
-                                    [
-                                        ft.Column(
-                                            [
-                                                ft.Text(
-                                                    'TOTAL BALANCE',
-                                                    size=11,
-                                                    weight=ft.FontWeight.BOLD,
-                                                    color=colors.TEXT_SECONDARY,
-                                                ),
-                                                self.total_text,
-                                                self.cleared_text,
-                                                self.uncleared_text,
-                                            ],
-                                            spacing=4,
-                                            expand=True,
-                                        ),
-                                        ft.Icon(
-                                            ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED,
-                                            size=36,
-                                            color=colors.BLUE,
-                                        ),
-                                    ]
-                                ),
-                                padding=20,
-                                border=ft.Border.all(1, colors.BORDER),
-                                border_radius=18,
-                            ),
-                            self.accounts_label,
-                            self.account_row,
-                            ft.Row(
-                                [
-                                    self.search,
-                                    self.account_filter,
-                                    self.cleared_filter,
-                                ],
-                                spacing=10,
-                            ),
-                            ft.Container(
-                                content=ft.Column(
-                                    [
-                                        self.register_header,
-                                        ft.Divider(height=1, color=colors.BORDER),
-                                        self.register,
-                                    ],
-                                    spacing=0,
-                                ),
-                                border=ft.Border.all(1, colors.BORDER),
-                                border_radius=16,
-                                padding=12,
-                            ),
-                            ft.Row(
-                                [
-                                    ft.TextButton(
-                                        'Export CSV',
-                                        icon=ft.Icons.TABLE_VIEW_OUTLINED,
-                                        key='export-ledger-csv-button',
-                                        on_click=lambda e: self._export('csv'),
-                                    ),
-                                    ft.TextButton(
-                                        'Export JSON',
-                                        icon=ft.Icons.DOWNLOAD_OUTLINED,
-                                        key='export-ledger-json-button',
-                                        on_click=lambda e: self._export('json'),
-                                    ),
-                                    ft.TextButton(
-                                        'Import ledger JSON',
-                                        icon=ft.Icons.UPLOAD_FILE_OUTLINED,
-                                        key='import-ledger-json-button',
-                                        on_click=lambda e: self._import(),
-                                    ),
-                                ]
-                            ),
-                        ],
-                        spacing=16,
-                        scroll=ft.ScrollMode.AUTO,
-                        expand=True,
-                    )
-                ],
+                [self.main_column],
                 alignment=ft.MainAxisAlignment.CENTER,
                 expand=True,
             ),
         )
+        self.refresh()
+        self.resize()
+
+    def resize(self):
+        width = self.page.width or 0
+        mobile = width < 600
+        self.control.padding = 12 if mobile else 24
+        self.header_title.expand = not mobile
+        self.search.expand = not mobile
+        self.search.width = max(160, width - 48) if mobile else None
+        if mobile:
+            self.header_actions.controls = []
+            self.header_layout = ft.Column(
+                [self.header_title, self.header_buttons], spacing=8
+            )
+            self.filters_row.controls = []
+            self.filters_row = ft.Column([self.search, self.filter_controls], spacing=8)
+        else:
+            self.header_actions.controls = [self.header_title, self.header_buttons]
+            self.header_layout = self.header_actions
+            self.filters_row = ft.Row([self.search, self.filter_controls], spacing=10)
+        self.main_column.controls[0] = self.header_layout
+        self.main_column.controls[4] = self.filters_row
+        self.footer_actions.wrap = True
+        self.account_filter.width = 150 if mobile else 200
+        self.cleared_filter.width = 120 if mobile else 150
+        self.date_width = 76 if mobile else 100
+        self.amount_width = 90 if mobile else 110
+        self.register_date_header.width = self.date_width
+        self.register_amount_header.width = self.amount_width
         self.refresh()
 
     def _changed(self):
@@ -541,7 +586,9 @@ class TransactionsDashboard:
                     content=ft.Row(
                         [
                             ft.Text(
-                                transaction.date, width=100, color=colors.TEXT_SECONDARY
+                                transaction.date,
+                                width=self.date_width,
+                                color=colors.TEXT_SECONDARY,
                             ),
                             ft.Column(
                                 [
@@ -647,7 +694,11 @@ class TransactionsDashboard:
         self.page.show_dialog(
             ft.AlertDialog(
                 title='Import ledger JSON',
-                content=dialog_form([path_input, error], height=120),
+                content=dialog_form(
+                    [path_input, error],
+                    height=120,
+                    width=dialog_width(self.page),
+                ),
                 actions=[
                     ft.TextButton(
                         'Cancel',

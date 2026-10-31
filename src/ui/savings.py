@@ -13,6 +13,7 @@ from ui.shared import (
     AmountAdjustmentDialog,
     ConfirmDialog,
     dialog_form,
+    dialog_width,
 )
 from utils import money_format, parse_money, parse_signed_money
 
@@ -223,6 +224,7 @@ class FundDialog:
                     error,
                 ],
                 height=420,
+                width=dialog_width(self.page),
             ),
             actions=actions,
             modal=True,
@@ -609,3 +611,5 @@ class Dashboard:
         margin = 12 if screen_width < 600 else 24
         self.content.width = min(760, max(screen_width - 2 * margin, 0))
         self.content.padding = margin
+        self.summary.control.padding = 12 if screen_width < 600 else 22
+        self.fund_list.list_view.spacing = 16 if screen_width < 600 else 30

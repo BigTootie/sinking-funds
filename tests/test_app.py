@@ -204,3 +204,28 @@ def test_conflict_review_can_accept_the_remote_value(monkeypatch, tmp_path):
 
     asyncio.run(click(app.page, f'sync-use-remote-{conflict["id"]}'))
     assert [item.name for item in app.ledger.list_accounts()] == ['Remote name']
+
+
+@pytest.mark.asyncio
+async def test_nextcloud_password_is_loaded_from_the_local_database_on_restart(
+    monkeypatch, tmp_path
+):
+    import json
+
+    import nextcloud
+
+    app, _ledger_path = make_app(monkeypatch, tmp_path)
+    document = {
+        'base_url': 'cloud.example.test',
+        'username': 'test-user',
+        'password': 'test-password',
+        'data_path': 'Savings',
+    }
+    app.ledger.set_setting('nextcloud_config', json.dumps(document))
+
+    restarted = app_module.SavingsFundsApp(FakePage())
+    await restarted.perform_nextcloud_sync()
+
+    assert restarted.nextcloud_sync_data == document
+    assert restarted.sync_engine is not None
+    assert nextcloud.get_sync_key(restarted.ledger) is None

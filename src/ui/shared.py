@@ -9,6 +9,22 @@ import flet as ft
 import colors
 from utils import parse_money, parse_signed_money
 
+MOBILE_BREAKPOINT = 600
+
+
+def is_mobile(page) -> bool:
+    """Return True when the page is a phone-sized layout."""
+    width = getattr(page, 'width', 0) or 0
+    return bool(width and width < MOBILE_BREAKPOINT)
+
+
+def dialog_width(page, default: int = 320) -> int:
+    """Keep dialogs usable on phones while preserving desktop widths."""
+    width = getattr(page, 'width', None)
+    if not width:
+        return default
+    return min(default, max(220, int(width) - 48))
+
 
 def show_snack(
     page: ft.Page,
@@ -59,7 +75,9 @@ def show_snack(
     return snack
 
 
-def dialog_form(controls: list[ft.Control], *, height: int) -> ft.ListView:
+def dialog_form(
+    controls: list[ft.Control], *, height: int, width: int = 320
+) -> ft.ListView:
     """Build a finite, scrollable form body for an AlertDialog.
 
     Flet 1.0.5 cannot lay out a tight Column containing TextField controls:
@@ -68,7 +86,7 @@ def dialog_form(controls: list[ft.Control], *, height: int) -> ft.ListView:
     """
     return ft.ListView(
         controls=controls,
-        width=320,
+        width=width,
         height=height,
         spacing=10,
         padding=0,
@@ -106,7 +124,7 @@ class MessageDialog:
             title=title,
             content=ft.Container(
                 content=ft.Text(message, selectable=True),
-                width=440,
+                width=dialog_width(page, 440),
             ),
             actions=[
                 ft.FilledButton(
@@ -141,7 +159,9 @@ class ConfirmDialog:
 
         self.control = ft.AlertDialog(
             title=title,
-            content=ft.Container(content=ft.Text(message), width=380),
+            content=ft.Container(
+                content=ft.Text(message), width=dialog_width(page, 380)
+            ),
             actions=[
                 ft.TextButton(
                     'Cancel',
@@ -240,7 +260,11 @@ class AccountBalanceDialog:
 
         self.control = ft.AlertDialog(
             title=title,
-            content=dialog_form([balance_input, error], height=120),
+            content=dialog_form(
+                [balance_input, error],
+                height=120,
+                width=dialog_width(self.page),
+            ),
             actions=actions,
             modal=True,
         )
@@ -290,7 +314,11 @@ class AmountAdjustmentDialog:
         action = 'Add to' if adding else 'Remove from'
         self.control = ft.AlertDialog(
             title=f'{action} {name} balance',
-            content=dialog_form([amount_input, error], height=120),
+            content=dialog_form(
+                [amount_input, error],
+                height=120,
+                width=dialog_width(self.page),
+            ),
             actions=[
                 ft.TextButton(
                     'Cancel',
