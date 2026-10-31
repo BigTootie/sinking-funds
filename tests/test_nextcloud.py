@@ -74,7 +74,7 @@ def test_sync_key_is_stored_in_the_local_database(tmp_path):
     assert nextcloud.get_sync_key(ledger) is None
 
 
-def test_missing_saved_password_is_reported_without_leaking_it(tmp_path):
+def test_missing_saved_password_is_loaded_for_settings_editing(tmp_path):
     ledger = Ledger(tmp_path / 'ledger.db')
     ledger.set_setting(
         'nextcloud_config',
@@ -82,5 +82,7 @@ def test_missing_saved_password_is_reported_without_leaking_it(tmp_path):
         '"data_path": "Savings"}',
     )
 
-    with pytest.raises(nextcloud.SyncError, match='password'):
-        nextcloud.load_nextcloud_sync_data_from_db(ledger)
+    loaded = nextcloud.load_nextcloud_sync_data_from_db(ledger)
+    assert loaded is not None
+    assert loaded['password'] == ''
+    assert loaded['base_url'] == 'cloud.example.test'

@@ -207,6 +207,35 @@ def test_conflict_review_can_accept_the_remote_value(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_missing_nextcloud_password_is_a_notice_not_a_startup_error(
+    monkeypatch, tmp_path
+):
+    import json
+
+    app, _ledger_path = make_app(monkeypatch, tmp_path)
+    app.ledger.set_setting(
+        'nextcloud_config',
+        json.dumps(
+            {
+                'base_url': 'cloud.example.test',
+                'username': 'test-user',
+                'data_path': 'Savings',
+            }
+        ),
+    )
+
+    restarted = app_module.SavingsFundsApp(FakePage())
+    await restarted.perform_nextcloud_sync()
+    restarted.load_account_balance_and_funds()
+
+    assert restarted.nextcloud_sync_data is not None
+    assert restarted.nextcloud_sync_data['password'] == ''
+    assert restarted.sync_engine is None
+    assert 're-enter' in (restarted.startup_notice or '').lower()
+    assert not restarted.startup_errors
+
+
+@pytest.mark.asyncio
 async def test_nextcloud_password_is_loaded_from_the_local_database_on_restart(
     monkeypatch, tmp_path
 ):

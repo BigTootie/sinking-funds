@@ -161,6 +161,12 @@ class SavingsFundsApp:
             self.nextcloud_sync_data = None
 
         if self.nextcloud_sync_data:
+            if not self.nextcloud_sync_data.get('password'):
+                self.startup_notice = (
+                    'The Nextcloud password is missing from this device. '
+                    'Open Settings and re-enter it to resume synchronization.'
+                )
+                return
             self._configure_sync_engine()
             self._update_sync_status()
             self._schedule_sync()
@@ -465,6 +471,12 @@ class SavingsFundsApp:
     async def _manual_sync(self):
         if not self.nextcloud_sync_data:
             self._show_snack('Configure Nextcloud before syncing.', colors.RED)
+            return
+        if not self.nextcloud_sync_data.get('password'):
+            self._show_snack(
+                'Re-enter the Nextcloud password in Settings before syncing.',
+                colors.RED,
+            )
             return
         if hasattr(self, 'settings_view'):
             self.settings_view.set_sync_status('Syncing…')

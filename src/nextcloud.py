@@ -88,13 +88,15 @@ def _connection_document(raw: str) -> dict:
         document = json.loads(raw)
         if not isinstance(document, dict):
             raise ValueError('expected an object')
-        required = ('base_url', 'username', 'data_path', 'password')
+        required = ('base_url', 'username', 'data_path')
         if any(not isinstance(document.get(key), str) for key in required):
             raise ValueError('missing connection fields')
+        password = document.get('password', '')
+        if not isinstance(password, str):
+            raise ValueError('invalid password field')
         if not document['base_url'].strip() or not document['data_path'].strip():
             raise ValueError('server URL and data path are required')
-        if not document['password']:
-            raise ValueError('password is required')
+        document['password'] = password
         document['base_url'] = normalize_base_url(document['base_url'])
     except (json.JSONDecodeError, TypeError, ValueError) as exc:
         raise SyncError(
