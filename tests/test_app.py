@@ -11,7 +11,7 @@ import data
 import ledger
 from budget import BudgetCategory, BudgetState, current_period
 from fund import Fund
-from sync.engine import SyncOutcome
+from sync.engine import SyncEngine, SyncOutcome
 from sync.provider import LocalFolderProvider
 
 
@@ -301,6 +301,49 @@ async def test_first_sync_runs_before_the_account_balance_prompt(monkeypatch, tm
 
     assert app.account_balance == Decimal('777.00')
     assert app.dashboard is not None
+    assert [account.name for account in app.ledger.list_accounts()] == [
+        'Remote Savings'
+    ]
+
+
+@pytest.mark.asyncio
+async def test_first_run_configuration_syncs_before_balance_prompt(
+    monkeypatch, tmp_path
+):
+    import asyncio
+
+    import ui.settings as settings_ui
+
+    remote = tmp_path / 'remote'
+    source = ledger.Ledger(tmp_path / 'source.db')
+    source.add_account('Remote Savings', 'savings', '888')
+    provider = LocalFolderProvider(remote)
+    SyncEngine(source, provider).sync()
+
+    app_db = tmp_path / 'app.db'
+    monkeypatch.setattr(ledger, 'LEDGER_DB', app_db)
+    monkeypatch.setattr(app_module, 'WebDAVProvider', lambda *_args: provider)
+    monkeypatch.setattr(settings_ui, 'ping_nextcloud_server', lambda _data: (True, ''))
+
+    app = app_module.SavingsFundsApp(FakePage())
+    task = asyncio.create_task(app.perform_nextcloud_sync())
+    await asyncio.sleep(0)
+    dialog = app.nextcloud_dialog.control
+    fields = {
+        control.key: control
+        for control in dialog.content.controls
+        if getattr(control, 'key', None)
+    }
+    fields['nextcloud-url-input'].value = 'cloud.example.test'
+    fields['nextcloud-username-input'].value = 'test-user'
+    fields['nextcloud-password-input'].value = 'test-password'
+    fields['nextcloud-path-input'].value = 'Savings'
+
+    await dialog.actions[-1].on_click(None)
+    await task
+    app.load_account_balance_and_funds()
+
+    assert app.account_balance == Decimal('888.00')
     assert [account.name for account in app.ledger.list_accounts()] == [
         'Remote Savings'
     ]

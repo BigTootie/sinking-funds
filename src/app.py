@@ -169,34 +169,10 @@ class SavingsFundsApp:
         )
 
     async def perform_nextcloud_sync(self):
-        """Load synchronization settings and schedule the startup sync."""
-        try:
-            self.nextcloud_sync_data = load_nextcloud_sync_data_from_db(self.ledger)
-        except (DataFileError, OSError, SyncError) as exc:
-            self.startup_errors.append(str(exc))
-            self.nextcloud_sync_data = None
-
+        """Load synchronization settings and run the startup sync."""
+        self._load_nextcloud_settings()
         if self.nextcloud_sync_data:
-            if not self.nextcloud_sync_data.get('password'):
-                self.startup_notice = (
-                    'The Nextcloud password is missing from this device. '
-                    'Open Settings and re-enter it to resume synchronization.'
-                )
-                return
-            self._configure_sync_engine()
-            self._update_sync_status()
-            if not self.ledger.list_accounts():
-                # A new device needs the remote snapshot before deciding
-                # whether to show the account-balance prompt.
-                self.startup_loading.visible = True
-                self.page.update()
-                try:
-                    await self._run_sync(manual=False)
-                finally:
-                    self.startup_loading.visible = False
-                    self.page.update()
-            # Existing local data can render immediately; the dashboard
-            # schedules its normal background sync once it is ready.
+            await self._startup_sync_if_configured()
             return
 
         if self.ledger.get_meta('nextcloud_prompted') == '1':
@@ -217,6 +193,43 @@ class SavingsFundsApp:
                     self.page.pop_dialog()
             finally:
                 self.ledger.set_meta('nextcloud_prompted', '1')
+
+            # A newly configured connection must sync before local startup
+            # decides whether an account balance already exists remotely.
+            self._load_nextcloud_settings()
+            if self.nextcloud_sync_data:
+                await self._startup_sync_if_configured()
+
+    def _load_nextcloud_settings(self):
+        try:
+            self.nextcloud_sync_data = load_nextcloud_sync_data_from_db(self.ledger)
+        except (DataFileError, OSError, SyncError) as exc:
+            self.startup_errors.append(str(exc))
+            self.nextcloud_sync_data = None
+
+    async def _startup_sync_if_configured(self):
+        if not self.nextcloud_sync_data:
+            return
+        if not self.nextcloud_sync_data.get('password'):
+            self.startup_notice = (
+                'The Nextcloud password is missing from this device. '
+                'Open Settings and re-enter it to resume synchronization.'
+            )
+            return
+        self._configure_sync_engine()
+        self._update_sync_status()
+        if not self.ledger.list_accounts():
+            # A new device needs the remote snapshot before deciding whether
+            # to show the account-balance prompt.
+            self.startup_loading.visible = True
+            self.page.update()
+            try:
+                await self._run_sync(manual=False)
+            finally:
+                self.startup_loading.visible = False
+                self.page.update()
+        # Existing local data renders immediately; the dashboard schedules
+        # its normal background sync once it is ready.
 
     def _configure_sync_engine(self):
         if not self.nextcloud_sync_data:
