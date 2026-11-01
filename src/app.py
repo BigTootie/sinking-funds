@@ -142,6 +142,21 @@ class SavingsFundsApp:
             self._show_sync_conflicts,
         )
 
+        self.startup_loading = ft.Container(
+            content=ft.Row(
+                [
+                    ft.ProgressRing(width=26, height=26, stroke_width=3),
+                    ft.Text('Syncing your data…'),
+                ],
+                alignment=ft.MainAxisAlignment.CENTER,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                spacing=14,
+            ),
+            alignment=ft.Alignment.CENTER,
+            expand=True,
+            visible=False,
+            key='startup-loading',
+        )
         self.page.add(
             ft.SafeArea(
                 content=self.header.control,
@@ -149,6 +164,7 @@ class SavingsFundsApp:
                 avoid_intrusions_left=False,
                 avoid_intrusions_right=False,
             ),
+            self.startup_loading,
             self.settings_view.control,
         )
 
@@ -169,7 +185,18 @@ class SavingsFundsApp:
                 return
             self._configure_sync_engine()
             self._update_sync_status()
-            await self._run_sync(manual=False)
+            if not self.ledger.list_accounts():
+                # A new device needs the remote snapshot before deciding
+                # whether to show the account-balance prompt.
+                self.startup_loading.visible = True
+                self.page.update()
+                try:
+                    await self._run_sync(manual=False)
+                finally:
+                    self.startup_loading.visible = False
+                    self.page.update()
+            # Existing local data can render immediately; the dashboard
+            # schedules its normal background sync once it is ready.
             return
 
         if self.ledger.get_meta('nextcloud_prompted') == '1':

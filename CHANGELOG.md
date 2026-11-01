@@ -20,8 +20,9 @@
   review to Settings.
 - Ensure Nextcloud failures, invalid documents, checksum mismatches, and
   unsupported protocol versions fail safely without corrupting local data.
-- Run the initial sync before the first-run balance prompt and report all known
-  devices in Settings.
+- Run the initial sync before the first-run balance prompt, show a sync
+  indicator on new devices, and report all known devices in Settings.
+- Keep existing devices interactive while their normal background sync runs.
 - Preserve savings-fund ordering across snapshots and operations.
 
 ### Mobile UI
