@@ -1,5 +1,6 @@
 """Headless tests for settings and Nextcloud configuration."""
 
+import asyncio
 import inspect
 import json
 from types import SimpleNamespace
@@ -150,3 +151,35 @@ def test_nextcloud_dialog_exposes_optional_encryption_and_key_generation():
     assert passphrase.visible is True
     generate.on_click(None)
     assert passphrase.value
+
+
+async def test_first_run_configuration_notifies_app_before_completion(monkeypatch):
+    page = SimpleNamespace(
+        show_dialog=lambda control: None,
+        pop_dialog=lambda: None,
+        update=lambda: None,
+    )
+    saved = []
+    event = asyncio.Event()
+    monkeypatch.setattr(settings_ui, 'ping_nextcloud_server', lambda _data: (True, ''))
+    dialog = settings_ui.NextcloudConfigDialog(
+        page,
+        saved.append,
+        save_settings=lambda _data: True,
+    )
+
+    dialog.add(event)
+    fields = {
+        control.key: control
+        for control in dialog.control.content.controls
+        if getattr(control, 'key', None)
+    }
+    fields['nextcloud-url-input'].value = 'cloud.example.test'
+    fields['nextcloud-username-input'].value = 'test-user'
+    fields['nextcloud-password-input'].value = 'test-password'
+    fields['nextcloud-path-input'].value = 'Savings'
+
+    await dialog.control.actions[-1].on_click(None)
+
+    assert event.is_set()
+    assert saved and saved[0]['base_url'] == 'cloud.example.test'

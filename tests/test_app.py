@@ -12,6 +12,7 @@ import ledger
 from budget import BudgetCategory, BudgetState, current_period
 from fund import Fund
 from sync.engine import SyncOutcome
+from sync.provider import LocalFolderProvider
 
 
 def make_app(monkeypatch, tmp_path, *, prompted=True):
@@ -23,7 +24,7 @@ def make_app(monkeypatch, tmp_path, *, prompted=True):
     store.set_setting('account_balance_set', '1')
     store.replace_funds([Fund('Emergency', 5000, 750)])
     store.replace_budget(
-        '2026-10', [BudgetCategory('Rent', 1200, 1200, group='Housing')]
+        current_period(), [BudgetCategory('Rent', 1200, 1200, group='Housing')]
     )
     app = app_module.SavingsFundsApp(FakePage())
     return app, ledger_path
@@ -251,6 +252,11 @@ async def test_nextcloud_password_is_loaded_from_the_local_database_on_restart(
         'data_path': 'Savings',
     }
     app.ledger.set_setting('nextcloud_config', json.dumps(document))
+    monkeypatch.setattr(
+        app_module,
+        'WebDAVProvider',
+        lambda *_args: LocalFolderProvider(tmp_path / 'remote'),
+    )
 
     restarted = app_module.SavingsFundsApp(FakePage())
     await restarted.perform_nextcloud_sync()
@@ -258,3 +264,43 @@ async def test_nextcloud_password_is_loaded_from_the_local_database_on_restart(
     assert restarted.nextcloud_sync_data == document
     assert restarted.sync_engine is not None
     assert nextcloud.get_sync_key(restarted.ledger) is None
+
+
+@pytest.mark.asyncio
+async def test_first_sync_runs_before_the_account_balance_prompt(monkeypatch, tmp_path):
+    import json
+
+    from sync.engine import SyncEngine
+
+    remote = tmp_path / 'remote'
+    source = ledger.Ledger(tmp_path / 'source.db')
+    source.add_account('Remote Savings', 'savings', '777')
+    provider = LocalFolderProvider(remote)
+    SyncEngine(source, provider).sync()
+
+    app_db = tmp_path / 'app.db'
+    monkeypatch.setattr(ledger, 'LEDGER_DB', app_db)
+    store = ledger.Ledger(app_db)
+    store.set_meta('nextcloud_prompted', '1')
+    store.set_setting(
+        'nextcloud_config',
+        json.dumps(
+            {
+                'base_url': 'cloud.example.test',
+                'username': 'test-user',
+                'password': 'test-password',
+                'data_path': 'Savings',
+            }
+        ),
+    )
+    monkeypatch.setattr(app_module, 'WebDAVProvider', lambda *_args: provider)
+
+    app = app_module.SavingsFundsApp(FakePage())
+    await app.perform_nextcloud_sync()
+    app.load_account_balance_and_funds()
+
+    assert app.account_balance == Decimal('777.00')
+    assert app.dashboard is not None
+    assert [account.name for account in app.ledger.list_accounts()] == [
+        'Remote Savings'
+    ]

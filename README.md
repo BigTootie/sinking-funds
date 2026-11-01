@@ -53,7 +53,9 @@ uv run flet run --web
 
 On first launch, the app asks for an account balance and offers optional
 Nextcloud setup. Select Skip to use the app without synchronization. The
-Nextcloud URL field expects a host name, such as `cloud.example.com`.
+Nextcloud URL field expects a host name, such as `cloud.example.com`. When a
+configured device starts with existing sync data, the first sync runs before
+the balance prompt; a remote account suppresses the prompt on a new device.
 
 ## Local data
 

@@ -236,10 +236,9 @@ class NextcloudConfigDialog:
             if not self._persist(data, error):
                 return
             self.page.pop_dialog()
+            self.on_saved(data)
             if on_complete is not None:
                 on_complete.set()
-            else:
-                self.on_saved(data)
 
         actions: list[ft.Control] = []
         if on_complete is not None:

@@ -169,7 +169,7 @@ class SavingsFundsApp:
                 return
             self._configure_sync_engine()
             self._update_sync_status()
-            self._schedule_sync()
+            await self._run_sync(manual=False)
             return
 
         if self.ledger.get_meta('nextcloud_prompted') == '1':
@@ -463,8 +463,6 @@ class SavingsFundsApp:
         self.nextcloud_sync_data = data
         self._configure_sync_engine()
         self._update_sync_status()
-        if hasattr(self, 'settings_view'):
-            self.settings_view.control.visible = True
         self.page.update()
         self._schedule_sync()
 
@@ -583,13 +581,10 @@ class SavingsFundsApp:
             # Do not write incomplete state over data that failed to load.
             self.startup_notice = None
 
-        balance_configured = self.ledger.get_setting(
-            'account_balance_set'
-        ) == '1' or bool(self.ledger.list_transactions())
+        # A synced account is enough to know the remote device already has a
+        # balance; `account_balance_set` is device-local and is not synced.
         self.account_balance = (
-            self.ledger.total_balance()
-            if self.ledger.list_accounts() and balance_configured
-            else None
+            self.ledger.total_balance() if self.ledger.list_accounts() else None
         )
         self._auto_post_fund_contributions()
 

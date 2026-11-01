@@ -260,3 +260,29 @@ def test_keeping_the_local_conflict_value_pushes_a_counter_operation(tmp_path):
     local_engine(a, remote).sync()
 
     assert [account.name for account in a.list_accounts()] == ['B name']
+
+
+def test_fund_order_survives_a_new_device_bootstrap(tmp_path):
+    a = make_ledger(tmp_path / 'a.db')
+    b = make_ledger(tmp_path / 'b.db')
+    remote = tmp_path / 'remote'
+    a.replace_funds([Fund('First', 100), Fund('Second', 200), Fund('Third', 300)])
+
+    local_engine(a, remote).sync()
+    local_engine(b, remote).sync()
+
+    assert [fund.name for fund in b.list_funds()] == ['First', 'Second', 'Third']
+
+
+def test_new_device_reports_all_known_devices(tmp_path):
+    a = make_ledger(tmp_path / 'a.db')
+    b = make_ledger(tmp_path / 'b.db')
+    c = make_ledger(tmp_path / 'c.db')
+    remote = tmp_path / 'remote'
+    a.add_account('Checking', 'checking', '100')
+
+    local_engine(a, remote).sync()
+    local_engine(b, remote).sync()
+    local_engine(c, remote).sync()
+
+    assert len(c.list_sync_devices()) == 3

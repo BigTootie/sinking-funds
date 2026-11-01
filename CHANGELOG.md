@@ -20,6 +20,9 @@
   review to Settings.
 - Ensure Nextcloud failures, invalid documents, checksum mismatches, and
   unsupported protocol versions fail safely without corrupting local data.
+- Run the initial sync before the first-run balance prompt and report all known
+  devices in Settings.
+- Preserve savings-fund ordering across snapshots and operations.
 
 ### Mobile UI
 

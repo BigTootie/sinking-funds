@@ -258,6 +258,7 @@ class Ledger:
                     due_day INTEGER NOT NULL DEFAULT 31,
                     kind TEXT NOT NULL DEFAULT 'savings_goal',
                     priority INTEGER NOT NULL DEFAULT 0,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
                     status TEXT NOT NULL DEFAULT 'active',
                     source_account_id TEXT,
                     destination_account_id TEXT,
@@ -359,6 +360,7 @@ class Ledger:
                 ('due_day', 'INTEGER NOT NULL DEFAULT 31'),
                 ('kind', "TEXT NOT NULL DEFAULT 'savings_goal'"),
                 ('priority', 'INTEGER NOT NULL DEFAULT 0'),
+                ('sort_order', 'INTEGER NOT NULL DEFAULT 0'),
                 ('status', "TEXT NOT NULL DEFAULT 'active'"),
                 ('source_account_id', 'TEXT'),
                 ('destination_account_id', 'TEXT'),
@@ -367,6 +369,25 @@ class Ledger:
                 ('updated_at', 'TEXT'),
             ):
                 self._ensure_column(connection, 'funds', column, definition)
+            if (
+                connection.execute(
+                    'SELECT 1 FROM meta WHERE key = ?', ('fund_sort_migrated',)
+                ).fetchone()
+                is None
+            ):
+                for index, row in enumerate(
+                    connection.execute(
+                        'SELECT id FROM funds ORDER BY created_at, rowid'
+                    ).fetchall()
+                ):
+                    connection.execute(
+                        'UPDATE funds SET sort_order = ? WHERE id = ?',
+                        (index, row['id']),
+                    )
+                connection.execute(
+                    'INSERT INTO meta(key, value) VALUES (?, ?)',
+                    ('fund_sort_migrated', '1'),
+                )
 
             now = _now()
             for version in range(1, SCHEMA_VERSION + 1):
@@ -613,13 +634,46 @@ class Ledger:
         )
 
     def list_sync_devices(self) -> list[dict]:
+        devices: dict[str, dict] = {}
         with self._connect() as connection:
             rows = connection.execute(
                 'SELECT device_id, MAX(lamport) AS lamport, '
                 'MAX(created_at) AS last_seen FROM sync_ops '
-                'GROUP BY device_id ORDER BY last_seen DESC'
+                'GROUP BY device_id'
             ).fetchall()
-        return [dict(row) for row in rows]
+        for row in rows:
+            devices[row['device_id']] = dict(row)
+        for key, default in (('devices', '[]'), ('cursors', '{}')):
+            try:
+                value = json.loads(self.get_sync_state(key, default) or default)
+            except json.JSONDecodeError:
+                value = [] if key == 'devices' else {}
+            if key == 'devices' and isinstance(value, list):
+                for device_id in value:
+                    if isinstance(device_id, str):
+                        devices.setdefault(
+                            device_id,
+                            {
+                                'device_id': device_id,
+                                'lamport': 0,
+                                'last_seen': None,
+                            },
+                        )
+            elif key == 'cursors' and isinstance(value, dict):
+                for device_id, lamport in value.items():
+                    if isinstance(lamport, int):
+                        entry = devices.setdefault(
+                            str(device_id),
+                            {
+                                'device_id': str(device_id),
+                                'lamport': 0,
+                                'last_seen': None,
+                            },
+                        )
+                        entry['lamport'] = max(int(entry['lamport']), lamport)
+        local = self._device_id()
+        devices.setdefault(local, {'device_id': local, 'lamport': 0, 'last_seen': None})
+        return sorted(devices.values(), key=lambda item: item['device_id'])
 
     def _sync_row(
         self,
@@ -1258,7 +1312,7 @@ class Ledger:
         where = '' if include_archived else "WHERE status != 'archived'"
         with self._connect() as connection:
             rows = connection.execute(
-                f'SELECT * FROM funds {where} ORDER BY created_at, rowid'
+                f'SELECT * FROM funds {where} ORDER BY sort_order, created_at, rowid'
             ).fetchall()
         return [self._fund_from_row(row) for row in rows]
 
@@ -1275,8 +1329,8 @@ class Ledger:
             existing = connection.execute(
                 'SELECT id, name, balance_minor, target_minor, target_date, '
                 'recurring_transfer_minor, due_day, kind, priority, status, '
-                'source_account_id, destination_account_id, notes '
-                'FROM funds ORDER BY rowid'
+                'source_account_id, destination_account_id, notes, sort_order '
+                'FROM funds ORDER BY sort_order, created_at, rowid'
             ).fetchall()
             desired = [
                 (
@@ -1293,8 +1347,9 @@ class Ledger:
                     fund.source_account_id,
                     fund.destination_account_id,
                     fund.notes,
+                    index,
                 )
-                for fund in funds
+                for index, fund in enumerate(funds)
             ]
             current = [tuple(row) for row in existing]
             if current == desired:
@@ -1304,9 +1359,9 @@ class Ledger:
                 'INSERT INTO funds '
                 '(id, name, balance_minor, target_minor, target_date, '
                 'recurring_transfer_minor, due_day, kind, priority, status, '
-                'source_account_id, destination_account_id, notes, '
+                'source_account_id, destination_account_id, notes, sort_order, '
                 'created_at, updated_at) '
-                'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                 [(*item, _now(), _now()) for item in desired],
             )
         return True
@@ -1315,16 +1370,24 @@ class Ledger:
     def save_fund(self, fund) -> None:
         with self._connect() as connection:
             existing = connection.execute(
-                'SELECT created_at FROM funds WHERE id = ?', (fund.id,)
+                'SELECT created_at, sort_order FROM funds WHERE id = ?', (fund.id,)
             ).fetchone()
-            created_at = existing['created_at'] if existing else _now()
+            if existing is not None:
+                created_at = existing['created_at']
+                sort_order = existing['sort_order']
+            else:
+                created_at = _now()
+                row = connection.execute(
+                    'SELECT COALESCE(MAX(sort_order), -1) FROM funds'
+                ).fetchone()
+                sort_order = int(row[0]) + 1
             connection.execute(
                 'INSERT OR REPLACE INTO funds '
                 '(id, name, balance_minor, target_minor, target_date, '
                 'recurring_transfer_minor, due_day, kind, priority, status, '
-                'source_account_id, destination_account_id, notes, '
+                'source_account_id, destination_account_id, notes, sort_order, '
                 'created_at, updated_at) '
-                'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                 (
                     fund.id,
                     fund.name,
@@ -1339,6 +1402,7 @@ class Ledger:
                     fund.source_account_id,
                     fund.destination_account_id,
                     fund.notes,
+                    sort_order,
                     created_at,
                     _now(),
                 ),
@@ -1990,14 +2054,14 @@ class Ledger:
                         transaction.get('updated_at', _now()),
                     ),
                 )
-            for fund in funds:
+            for index, fund in enumerate(funds):
                 connection.execute(
                     'INSERT INTO funds '
                     '(id, name, balance_minor, target_minor, target_date, '
                     'recurring_transfer_minor, due_day, kind, priority, status, '
-                    'source_account_id, destination_account_id, notes, '
+                    'source_account_id, destination_account_id, notes, sort_order, '
                     'created_at, updated_at) '
-                    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                     (
                         fund['id'],
                         fund['name'],
@@ -2012,6 +2076,7 @@ class Ledger:
                         fund.get('source_account_id'),
                         fund.get('destination_account_id'),
                         fund.get('notes', ''),
+                        int(fund.get('sort_order', index)),
                         fund.get('created_at', _now()),
                         fund.get('updated_at', _now()),
                     ),

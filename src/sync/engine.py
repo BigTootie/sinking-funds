@@ -190,7 +190,10 @@ class SyncEngine:
 
     def _push(self, cursors: dict[str, int]) -> int:
         operations = self.ledger.local_sync_ops()
+        path = self._ops_path(self.device_id)
         if not operations:
+            if self.provider.read_file(path) is None:
+                self.provider.write_file(path, self._encode(b''))
             return 0
         payloads = []
         for operation in operations:
@@ -206,9 +209,7 @@ class SyncEngine:
                     'created_at': operation['created_at'],
                 }
             )
-        self.provider.write_file(
-            self._ops_path(self.device_id), self._encode(encode_operations(payloads))
-        )
+        self.provider.write_file(path, self._encode(encode_operations(payloads)))
         return len(payloads)
 
     def _write_snapshot(self, cursors: dict[str, int]) -> bool:
@@ -236,6 +237,11 @@ class SyncEngine:
         try:
             self.provider.ensure_ready()
             self._ensure_manifest()
+            devices = set(self.provider.list_devices())
+            devices.add(self.device_id)
+            self.ledger.set_sync_state(
+                'devices', json.dumps(sorted(devices), sort_keys=True)
+            )
             self.ledger.ensure_sync_baseline()
             cursors = self._cursors()
             self._bootstrap_from_snapshot(cursors)
