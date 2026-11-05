@@ -110,7 +110,7 @@ def test_recurring_contribution_auto_posts_once_and_catches_up_current_month(
     assert register[0].budget_excluded is True
     assert register[0].affects_balance is False
     assert register[0].contribution_id == first[0].id
-    # A past month is not backfilled; only the current occurrence is caught up.
+    # A new fund does not backfill a month before its creation.
     assert ledger.list_fund_contributions(period='2026-09') == []
 
 
@@ -280,3 +280,34 @@ def test_transaction_classification_distinguishes_savings_expenses_and_transfers
     assert classifications['Transfer'] == 'transfer'
     assert classifications['Fund contribution: Emergency'] == 'savings'
     assert contribution.budget_excluded is True
+
+
+def test_missed_previous_month_contribution_is_caught_up(tmp_path):
+    ledger = make_ledger(tmp_path)
+    ledger.add_account('Checking', 'checking', '1000')
+    fund = Fund('Emergency', 1000, recurring_transfer=100, due_day=31)
+    ledger.replace_funds([fund])
+    with ledger._connect() as connection:
+        connection.execute(
+            "UPDATE funds SET created_at = '2026-09-01T00:00:00' WHERE id = ?",
+            (fund.id,),
+        )
+
+    posted = ledger.auto_post_fund_contributions(today=date(2026, 11, 1))
+
+    assert [contribution.period for contribution in posted] == ['2026-10']
+    assert posted[0].due_date == '2026-10-31'
+    assert ledger.get_fund(fund.id).balance == Decimal('100.00')
+    assert ledger.list_transactions(fund_id=fund.id)[0].date == '2026-10-31'
+    assert ledger.auto_post_fund_contributions(today=date(2026, 11, 1)) == []
+
+
+def test_new_fund_does_not_catch_up_a_month_before_creation(tmp_path):
+    ledger = make_ledger(tmp_path)
+    ledger.add_account('Checking', 'checking', '1000')
+    fund = Fund('Emergency', 1000, recurring_transfer=100, due_day=31)
+    ledger.replace_funds([fund])
+
+    posted = ledger.auto_post_fund_contributions(today=date(2026, 11, 1))
+
+    assert posted == []

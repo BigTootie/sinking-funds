@@ -14,6 +14,8 @@
   local until the user chooses **Keep local** or **Use remote** in Settings.
 - Deduplicate recurring fund contributions across devices with the existing
   `(fund_id, period)` identity, including offline catch-up cases.
+- Catch up the immediately preceding missed monthly occurrence when the app was
+  closed on a fund's due date, without backfilling older months.
 - Add optional end-to-end encryption using a user passphrase or recovery key,
   AES-GCM payloads, and a key stored in the local database.
 - Add sync status, last-sync/error reporting, device cursors, and conflict

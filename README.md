@@ -13,9 +13,9 @@ or web app. See [`CHANGELOG.md`](CHANGELOG.md) for release notes.
   actual/current amounts, “to be budgeted”, month navigation, plan copying, and
   archived budget history.
 - Automatically post due recurring fund contributions once per calendar month.
-  Posting is idempotent per fund/period, catches up only the current occurrence,
-  is visible in the register, allows overdrafts for configured destination
-  accounts, and can be undone.
+  Posting is idempotent per fund/period, catches up the current or immediately
+  previous missed occurrence, is visible in the register, allows overdrafts for
+  configured destination accounts, and can be undone.
 - Record one-off fund contributions. They are savings transfers, visibly
   budget-excluded, and do not reduce “to be budgeted”.
 - Track accounts and transactions in the same local SQLite database as funds and

@@ -1329,9 +1329,10 @@ class Ledger:
             existing = connection.execute(
                 'SELECT id, name, balance_minor, target_minor, target_date, '
                 'recurring_transfer_minor, due_day, kind, priority, status, '
-                'source_account_id, destination_account_id, notes, sort_order '
-                'FROM funds ORDER BY sort_order, created_at, rowid'
+                'source_account_id, destination_account_id, notes, sort_order, '
+                'created_at FROM funds ORDER BY sort_order, created_at, rowid'
             ).fetchall()
+            created_at_by_id = {row['id']: row['created_at'] for row in existing}
             desired = [
                 (
                     fund.id,
@@ -1348,6 +1349,7 @@ class Ledger:
                     fund.destination_account_id,
                     fund.notes,
                     index,
+                    created_at_by_id.get(fund.id, _now()),
                 )
                 for index, fund in enumerate(funds)
             ]
@@ -1362,7 +1364,7 @@ class Ledger:
                 'source_account_id, destination_account_id, notes, sort_order, '
                 'created_at, updated_at) '
                 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                [(*item, _now(), _now()) for item in desired],
+                [(*item, _now()) for item in desired],
             )
         return True
 
@@ -1834,12 +1836,34 @@ class Ledger:
             allow_negative=True,
         )
 
-    def auto_post_fund_contributions(self, funds=None, today=None) -> list:
-        """Post the current month's due recurring contribution per fund.
+    @staticmethod
+    def _previous_period(period: str) -> str:
+        year, month = (int(part) for part in period.split('-', 1))
+        if month == 1:
+            return f'{year - 1:04d}-12'
+        return f'{year:04d}-{month - 1:02d}'
 
-        Only the current occurrence is caught up; past months are never
-        silently backfilled. The unique ``(fund_id, period)`` index makes the
-        operation idempotent across restarts and devices.
+    def _fund_created_by(self, fund_id: str, due: date) -> bool:
+        with self._connect() as connection:
+            row = connection.execute(
+                'SELECT created_at FROM funds WHERE id = ?', (fund_id,)
+            ).fetchone()
+        if row is None or not row['created_at']:
+            return True
+        try:
+            created = date.fromisoformat(str(row['created_at'])[:10])
+        except ValueError:
+            return True
+        return created <= due
+
+    def auto_post_fund_contributions(self, funds=None, today=None) -> list:
+        """Post due recurring contributions, including a missed prior month.
+
+        The current month is posted when its due date arrives. If that month's
+        due date is still in the future, the immediately preceding month is
+        caught up when it was missed. Older months are not backfilled. The
+        unique ``(fund_id, period)`` index keeps posting idempotent across
+        restarts and devices.
         """
         from fund import due_date_for_period
 
@@ -1847,23 +1871,31 @@ class Ledger:
             today = today.date()
         today = today or date.today()
         period = today.strftime('%Y-%m')
+        previous_period = self._previous_period(period)
         funds = list(funds) if funds is not None else self.list_funds()
         posted = []
         for fund in funds:
             if not fund.is_active or fund.recurring_transfer <= 0:
                 continue
-            due = due_date_for_period(period, fund.due_day)
-            if today < due:
-                continue
-            contribution = self.add_fund_contribution(
-                fund,
-                period=period,
-                kind='recurring',
-                transaction_date=today,
-                due_date=due,
-            )
-            if contribution is not None:
-                posted.append(contribution)
+            current_due = due_date_for_period(period, fund.due_day)
+            candidates = []
+            previous_fund_due = due_date_for_period(previous_period, fund.due_day)
+            if today >= previous_fund_due and self._fund_created_by(
+                fund.id, previous_fund_due
+            ):
+                candidates.append((previous_period, previous_fund_due))
+            if today >= current_due:
+                candidates.append((period, current_due))
+            for contribution_period, due in candidates:
+                contribution = self.add_fund_contribution(
+                    fund,
+                    period=contribution_period,
+                    kind='recurring',
+                    transaction_date=due,
+                    due_date=due,
+                )
+                if contribution is not None:
+                    posted.append(contribution)
         return posted
 
     def post_due_fund_contributions(self, funds=None, today=None) -> list:
